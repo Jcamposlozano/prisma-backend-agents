@@ -1,0 +1,32 @@
+project:
+  name: westfield-agent-back-python
+  env: dev
+  log_level: INFO
+
+service:
+  host: 0.0.0.0
+  port: 8000
+  # Orígenes permitidos por CORS. El front del proyecto Node corre en
+  # localhost:5173 en dev. Agregar acá el dominio de producción cuando se
+  # despliegue (Railway, etc.).
+  cors_origins:
+    - http://localhost:5173
+
+worker:
+  enabled: true
+  interval_seconds: 10
+
+# Configuración específica del agente Maia (sobreescribible vía env vars).
+maia:
+  # Ruta al índice RAG que produce `npm run ingest` en el proyecto Node y
+  # se copia a este servicio. Default: ./data/maia-index.json
+  index_path: ./data/maia-index.json
+  openai:
+    model: gpt-4o-mini
+    embedding_model: text-embedding-3-small
+    base_url: https://api.openai.com/v1
+
+rate_limit:
+  # Ventana deslizante por IP — paridad con el backend Node.
+  window_seconds: 60
+  max_requests: 12

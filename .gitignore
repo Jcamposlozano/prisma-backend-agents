@@ -1,0 +1,21 @@
+__pycache__/
+.venv/
+venv/
+*.pyc
+*.pyo
+.env
+.env.local
+.env.*.local
+.DS_Store
+*.log
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+dist/
+build/
+*.egg-info/
+
+# El índice RAG se regenera con `npm run ingest` en el proyecto Node y se
+# copia manualmente. No lo commiteamos: cambia de tamaño y se filtran
+# embeddings que no son útiles en el repo.
+data/maia-index.json

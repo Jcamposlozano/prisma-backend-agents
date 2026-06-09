@@ -1,0 +1,22 @@
+services:
+  api:
+    build: .
+    container_name: westfield_agent_back_python_api
+    env_file: [.env]
+    ports: ["8000:8000"]
+    command: ["python", "-m", "westfield_agent_back_python.main_api"]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/api/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  worker:
+    build: .
+    container_name: westfield_agent_back_python_worker
+    env_file: [.env]
+    command: ["python", "-m", "westfield_agent_back_python.main_worker"]
+    depends_on:
+      api:
+        condition: service_healthy
