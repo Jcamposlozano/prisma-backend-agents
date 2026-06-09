@@ -132,10 +132,3 @@ No hay tests de integración contra OpenAI real — eso queda para QA manual con
 
 ---
 
-## Lo que NO está en V1
-
-- **Ingesta**: `npm run ingest` se sigue corriendo desde el Node. (V2)
-- **Adapter Lambda**: el Node tenía `server/lambda.ts`; no se portó. Si hace falta deployar en Lambda, escribir un adapter siguiendo el mismo patrón composition root.
-- **Static serving del front**: este servicio sólo expone la API. El front lo siguen sirviendo Vite (dev) o Hono (prod del Node).
-- **Persistencia del rate limit**: queda in-memory. Si se mueve a producción con escala real, conviene Redis.
-- **Tests del use case `AskMaia`**: se cubren las piezas (sanitizers, fallback, prompt, retriever). Para tests end-to-end del use case se necesita mockear el ChatClient — fácil de agregar.
