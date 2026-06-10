@@ -3,3 +3,6 @@ project:
   log_level: DEBUG
 worker:
   interval_seconds: 5
+registry:
+  # TTL corto en dev para ver rápido los cambios publicados en S3.
+  ttl_seconds: 30

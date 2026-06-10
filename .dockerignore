@@ -1,0 +1,29 @@
+# NUNCA dentro de la imagen: credenciales y entornos locales.
+.env
+.env.*
+.venv/
+venv/
+
+# Git e IDE
+.git/
+.gitignore
+.idea/
+.vscode/
+
+# Caches y artefactos
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+dist/
+build/
+*.egg-info/
+
+# No necesarios en runtime
+tests/
+docs/
+scripts/
+Makefile
+.pre-commit-config.yaml
+docker-compose.yml

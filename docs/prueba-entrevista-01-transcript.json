@@ -1,0 +1,192 @@
+[
+  {
+    "turno": 0,
+    "state": {
+      "current_question": 1,
+      "turns_for_current_question": 0
+    },
+    "student": "(apertura)",
+    "response": {
+      "agent_id": "maia",
+      "conversation_id": "prueba-entrevista-01",
+      "message": "Para comenzar, reflexionemos sobre la primera pregunta de introspección: ¿Dónde se encuentra el problema, y cuáles son las alternativas?",
+      "structured": {
+        "message": "Para comenzar, reflexionemos sobre la primera pregunta de introspección: ¿Dónde se encuentra el problema, y cuáles son las alternativas?",
+        "rubric_level": "muy_pobre",
+        "current_question": 1,
+        "advance_to_next_question": false,
+        "is_final_summary": false,
+        "unresolved_points": []
+      },
+      "sources": [],
+      "fallback": false,
+      "rag_used": false
+    }
+  },
+  {
+    "turno": 1,
+    "state": {
+      "current_question": 1,
+      "turns_for_current_question": 0
+    },
+    "student": "El problema central de Mariola es que ha tocado el 'techo de cristal' de la plataforma, sufriendo los efectos secundario...",
+    "response": {
+      "agent_id": "maia",
+      "conversation_id": "prueba-entrevista-01",
+      "message": "Has identificado varios problemas significativos que enfrenta Mariola. Sin embargo, me pregunto, ¿qué evidencia concreta tienes para afirmar que el estancamiento de sus ventas se debe principalmente al modelo de agregación de Etsy? ¿Podrías considerar otros factores que también podrían estar contribuyendo a este estancamiento?",
+      "structured": {
+        "message": "Has identificado varios problemas significativos que enfrenta Mariola. Sin embargo, me pregunto, ¿qué evidencia concreta tienes para afirmar que el estancamiento de sus ventas se debe principalmente al modelo de agregación de Etsy? ¿Podrías considerar otros factores que también podrían estar contribuyendo a este estancamiento?",
+        "rubric_level": "satisfactorio",
+        "current_question": 1,
+        "advance_to_next_question": false,
+        "is_final_summary": false,
+        "unresolved_points": []
+      },
+      "sources": [
+        {
+          "doc_title": "Caso académico Etsy",
+          "doc_tag": "case",
+          "similarity": 0.8273
+        }
+      ],
+      "fallback": false,
+      "rag_used": true
+    }
+  },
+  {
+    "turno": 2,
+    "state": {
+      "current_question": 1,
+      "turns_for_current_question": 1
+    },
+    "student": "Para sustentar el 'techo de cristal' me baso en tres evidencias concretas: (1) Estancamiento del crecimiento histórico: ...",
+    "response": {
+      "agent_id": "maia",
+      "conversation_id": "prueba-entrevista-01",
+      "message": "Has presentado evidencia concreta para respaldar tu afirmación sobre el estancamiento de ventas. Sin embargo, consideremos la segunda parte de tu respuesta: las alternativas que has propuesto. ¿Qué factores específicos crees que podrían influir en la efectividad de las alternativas A (transición de marca propia) y B (pivotar a B2B)? ¿Cómo podrías medir el éxito de cada una de estas estrategias?",
+      "structured": {
+        "message": "Has presentado evidencia concreta para respaldar tu afirmación sobre el estancamiento de ventas. Sin embargo, consideremos la segunda parte de tu respuesta: las alternativas que has propuesto. ¿Qué factores específicos crees que podrían influir en la efectividad de las alternativas A (transición de marca propia) y B (pivotar a B2B)? ¿Cómo podrías medir el éxito de cada una de estas estrategias?",
+        "rubric_level": "satisfactorio",
+        "current_question": 1,
+        "advance_to_next_question": false,
+        "is_final_summary": false
+      },
+      "sources": [
+        {
+          "doc_title": "Caso académico Etsy",
+          "doc_tag": "case",
+          "similarity": 0.7736
+        },
+        {
+          "doc_title": "Caso académico Etsy",
+          "doc_tag": "case",
+          "similarity": 0.7439
+        }
+      ],
+      "fallback": false,
+      "rag_used": true
+    }
+  },
+  {
+    "turno": 3,
+    "state": {
+      "current_question": 1,
+      "turns_for_current_question": 2
+    },
+    "student": "Que la fidelización recaiga en la plataforma y no en el creador cambia la dinámica de poder del negocio. Implicaciones: ...",
+    "response": {
+      "agent_id": "maia",
+      "conversation_id": "prueba-entrevista-01",
+      "message": "Has delineado bien las implicaciones de la dependencia de la plataforma y cómo estas afectan a Mariola. Sin embargo, me gustaría profundizar en la viabilidad de esas estrategias. ¿Qué desafíos específicos anticipas que Mariola podría enfrentar al implementar la alternativa A (transición de marca propia) y cómo podría superarlos? Además, en relación a la alternativa B (pivotar a B2B), ¿cómo aseguraría que esta estrategia no dependa nuevamente de la plataforma de Etsy para su éxito?",
+      "structured": {
+        "message": "Has delineado bien las implicaciones de la dependencia de la plataforma y cómo estas afectan a Mariola. Sin embargo, me gustaría profundizar en la viabilidad de esas estrategias. ¿Qué desafíos específicos anticipas que Mariola podría enfrentar al implementar la alternativa A (transición de marca propia) y cómo podría superarlos? Además, en relación a la alternativa B (pivotar a B2B), ¿cómo aseguraría que esta estrategia no dependa nuevamente de la plataforma de Etsy para su éxito?",
+        "rubric_level": "satisfactorio",
+        "current_question": 2,
+        "advance_to_next_question": true,
+        "is_final_summary": false,
+        "unresolved_points": []
+      },
+      "sources": [],
+      "fallback": false,
+      "rag_used": true
+    }
+  },
+  {
+    "turno": 4,
+    "state": {
+      "current_question": 2,
+      "turns_for_current_question": 0
+    },
+    "student": "Tres obstáculos principales y cómo superarlos: (1) Costo de adquisición de clientes y tráfico: Etsy aporta decenas de mi...",
+    "response": {
+      "agent_id": "maia",
+      "conversation_id": "prueba-entrevista-01",
+      "message": "Has identificado obstáculos claros y propuestas de solución para cada uno. Sin embargo, al considerar la alternativa B (pivotar a B2B), ¿cómo garantizaría Mariola que su propuesta de valor sea atractiva para los clientes mayoristas, especialmente en un mercado competitivo? ¿Qué elementos específicos de su oferta podrían destacar para diferenciarse de otros proveedores?",
+      "structured": {
+        "message": "Has identificado obstáculos claros y propuestas de solución para cada uno. Sin embargo, al considerar la alternativa B (pivotar a B2B), ¿cómo garantizaría Mariola que su propuesta de valor sea atractiva para los clientes mayoristas, especialmente en un mercado competitivo? ¿Qué elementos específicos de su oferta podrían destacar para diferenciarse de otros proveedores?",
+        "rubric_level": "satisfactorio",
+        "current_question": 3,
+        "advance_to_next_question": false,
+        "is_final_summary": false
+      },
+      "sources": [],
+      "fallback": false,
+      "rag_used": true
+    }
+  },
+  {
+    "turno": 5,
+    "state": {
+      "current_question": 2,
+      "turns_for_current_question": 1
+    },
+    "student": "Si el canal DTC no tracciona, las consecuencias serían: dependencia perpetua y estancamiento (seguir compitiendo contra ...",
+    "response": {
+      "agent_id": "maia",
+      "conversation_id": "prueba-entrevista-01",
+      "message": "Has presentado una serie de estrategias para mitigar los riesgos asociados a la transición hacia un canal DTC y la pivotación hacia B2B, lo cual es un enfoque reflexivo. Sin embargo, al considerar el papel de Etsy como una 'vaca lechera', ¿qué indicadores específicos utilizarías para evaluar si la dependencia de Etsy sigue siendo sostenible en el tiempo? Además, ¿cómo planeas equilibrar la inversión de tiempo y recursos entre mantener la presencia en Etsy y desarrollar los nuevos canales?",
+      "structured": {
+        "message": "Has presentado una serie de estrategias para mitigar los riesgos asociados a la transición hacia un canal DTC y la pivotación hacia B2B, lo cual es un enfoque reflexivo. Sin embargo, al considerar el papel de Etsy como una 'vaca lechera', ¿qué indicadores específicos utilizarías para evaluar si la dependencia de Etsy sigue siendo sostenible en el tiempo? Además, ¿cómo planeas equilibrar la inversión de tiempo y recursos entre mantener la presencia en Etsy y desarrollar los nuevos canales?",
+        "rubric_level": "satisfactorio",
+        "current_question": 3,
+        "advance_to_next_question": true,
+        "is_final_summary": false,
+        "unresolved_points": []
+      },
+      "sources": [],
+      "fallback": false,
+      "rag_used": true
+    }
+  },
+  {
+    "turno": 6,
+    "state": {
+      "current_question": 3,
+      "turns_for_current_question": 0
+    },
+    "student": "La voz del cliente es la brújula de la transición: (1) Recuperar el control de la narrativa: hoy opera a ciegas sobre la...",
+    "response": {
+      "agent_id": "maia",
+      "conversation_id": "prueba-entrevista-01",
+      "message": "Has delineado un enfoque integral para la transición, utilizando la voz del cliente como guía y segmentando adecuadamente las propuestas de valor. Sin embargo, al considerar la implementación de estas estrategias, ¿cómo asegurarías que la recopilación de datos y feedback no se convierta en una carga adicional para Mariola, dado su tiempo limitado? ¿Qué mecanismos específicos podrías establecer para hacer este proceso más eficiente?",
+      "structured": {
+        "message": "Has delineado un enfoque integral para la transición, utilizando la voz del cliente como guía y segmentando adecuadamente las propuestas de valor. Sin embargo, al considerar la implementación de estas estrategias, ¿cómo asegurarías que la recopilación de datos y feedback no se convierta en una carga adicional para Mariola, dado su tiempo limitado? ¿Qué mecanismos específicos podrías establecer para hacer este proceso más eficiente?",
+        "rubric_level": "satisfactorio",
+        "current_question": 3,
+        "advance_to_next_question": false,
+        "is_final_summary": true,
+        "unresolved_points": [
+          "¿Qué elementos específicos de su oferta podrían destacar para diferenciarse de otros proveedores en el canal B2B?",
+          "¿Cómo asegurar que la dependencia de Etsy siga siendo sostenible en el tiempo?"
+        ]
+      },
+      "sources": [],
+      "fallback": false,
+      "rag_used": true
+    }
+  },
+  {
+    "turno": 7,
+    "student": "(no enviado — la entrevista ya cerró)"
+  }
+]

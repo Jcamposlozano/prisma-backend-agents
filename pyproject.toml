@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "westfield-agent-back-python"
-version = "0.1.0"
-description = "Backend Python (hexagonal-lite, FastAPI) del agente académico Maia de Westfield Business School. Port runtime-only del backend Node original."
+version = "0.2.0"
+description = "Runtime multi-agente (hexagonal-lite, FastAPI) de Westfield Business School. Carga config, prompts y bases vectoriales FAISS desde AWS S3 según agent_id."
 authors = ["Westfield Engineering <eng@westfield.example>"]
 readme = "README.md"
 packages = [{ include = "westfield_agent_back_python", from = "src" }]
@@ -16,6 +16,8 @@ numpy = "^1.26.0"
 pyyaml = "^6.0.1"
 python-dotenv = "^1.0.0"
 rich = "^13.7.0"
+boto3 = "^1.34.0"
+faiss-cpu = "^1.8.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.3.0"

@@ -16,17 +16,32 @@ worker:
   enabled: true
   interval_seconds: 10
 
-# Configuración específica del agente Maia (sobreescribible vía env vars).
-maia:
-  # Ruta al índice RAG que produce `npm run ingest` en el proyecto Node y
-  # se copia a este servicio. Default: ./data/maia-index.json
-  index_path: ./data/maia-index.json
-  openai:
-    model: gpt-4o-mini
-    embedding_model: text-embedding-3-small
-    base_url: https://api.openai.com/v1
+# Bucket S3 con la estructura agents/<agent_id>/{config.json, prompts/, vector_store/}.
+# Las credenciales AWS NO van acá: boto3 usa la cadena estándar
+# (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / perfil / rol IAM).
+s3:
+  bucket: westfield-agent-knowledge
+  region: us-east-1
+  prefix: agents
+
+# Caché en memoria de runtimes de agente (lazy load por agent_id).
+registry:
+  # Cuánto vive una entrada antes de recargar desde S3. Cambios en S3
+  # (nueva versión de vector store, prompt) tardan hasta este TTL en verse.
+  ttl_seconds: 300
+  # Caché negativa: cuánto recordar que un agent_id NO existe (evita
+  # martillar S3 con ids inventados).
+  negative_ttl_seconds: 30
+
+# Settings por proveedor LLM. Las API keys vienen SOLO de env vars
+# (OPENAI_API_KEY, etc.) — nunca del YAML.
+openai:
+  base_url: https://api.openai.com/v1
+  # Modelo de embeddings usado solo si el manifest.json del vector store
+  # no declara `embedding_model` (no debería pasar con la ingesta nueva).
+  embedding_model_fallback: text-embedding-3-small
 
 rate_limit:
-  # Ventana deslizante por IP — paridad con el backend Node.
+  # Ventana deslizante por IP+agente.
   window_seconds: 60
   max_requests: 12

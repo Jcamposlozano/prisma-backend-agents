@@ -1,13 +1,12 @@
-# Imagen del backend Maia (Python). Multi-stage no es necesario porque
-# Poetry instala dependencias finitas y la imagen final ya queda chica.
+# Imagen del runtime multi-agente (Python). Una sola imagen sirve a TODOS
+# los agentes — la config/prompts/vector stores se cargan desde S3 en runtime.
 #
 # Build:    docker build -t westfield-agent-back-python:latest .
 # Run:      docker run -p 8000:8000 --env-file .env westfield-agent-back-python:latest
 # Health:   curl http://localhost:8000/api/health
 #
-# Pre-requisito: data/maia-index.json debe estar en el build context (lo
-# generás con `npm run ingest` en el proyecto Westfield_agent y lo copiás
-# a ./data/). Si falta, el servicio igual arranca pero opera en fallback.
+# Env requerido en runtime: S3_BUCKET, AWS_REGION, S3_PREFIX, credenciales
+# AWS (o rol IAM) y OPENAI_API_KEY. Ver .env.example.
 
 FROM python:3.11-slim
 
@@ -29,9 +28,11 @@ RUN pip install --no-cache-dir "poetry==$POETRY_VERSION"
 
 # Cache layer: si pyproject.toml/poetry.lock no cambian, no reinstala deps.
 COPY pyproject.toml poetry.lock* /app/
-RUN poetry install --no-interaction --no-ansi --only main
+RUN poetry install --no-interaction --no-ansi --only main --no-root
 
+# Código + instalación del paquete (src layout → necesita el install del root).
 COPY . /app
+RUN poetry install --no-interaction --no-ansi --only main
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
   CMD curl -fsS http://localhost:8000/api/health || exit 1

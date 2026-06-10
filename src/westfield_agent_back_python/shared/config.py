@@ -1,13 +1,17 @@
 """
 Carga de configuración: base.yaml + <env>.yaml + override por env vars.
 
-Extiende el patrón del template ESIC con sección específica de Maia
-(`maia.index_path`, `maia.openai.*`) y `rate_limit`.
+Extiende el patrón del template ESIC con las secciones del runtime
+multi-agente: `s3` (bucket de conocimiento), `registry` (caché de agentes)
+y `openai` (settings del proveedor; las API keys vienen SOLO de env).
 
 Las env vars siempre ganan sobre el YAML. Eso permite:
   - dev local: editar configs/dev.yaml
-  - prod: setear OPENAI_API_KEY, PORT, etc. desde el orchestrator
+  - prod: setear S3_BUCKET, OPENAI_API_KEY, PORT, etc. desde el orchestrator
   - .env (vía python-dotenv): conveniencia local
+
+Las credenciales AWS no pasan por acá: boto3 usa su cadena estándar
+(AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / perfil / rol IAM).
 """
 
 from __future__ import annotations
@@ -65,8 +69,9 @@ def load_config(config_dir: str = "configs") -> dict[str, Any]:
     cfg.setdefault("project", {})
     cfg.setdefault("service", {})
     cfg.setdefault("worker", {})
-    cfg.setdefault("maia", {})
-    cfg["maia"].setdefault("openai", {})
+    cfg.setdefault("s3", {})
+    cfg.setdefault("registry", {})
+    cfg.setdefault("openai", {})
     cfg.setdefault("rate_limit", {})
 
     # ---- project ----
@@ -88,21 +93,33 @@ def load_config(config_dir: str = "configs") -> dict[str, Any]:
         os.getenv("WORKER_INTERVAL_SECONDS", cfg["worker"].get("interval_seconds", 10))
     )
 
-    # ---- maia (RAG + OpenAI) ----
-    cfg["maia"]["index_path"] = os.getenv(
-        "MAIA_INDEX_PATH", cfg["maia"].get("index_path", "./data/maia-index.json")
+    # ---- s3 (bucket de conocimiento multi-agente) ----
+    cfg["s3"]["bucket"] = os.getenv(
+        "S3_BUCKET", cfg["s3"].get("bucket", "westfield-agent-knowledge")
     )
-    openai_cfg = cfg["maia"]["openai"]
+    cfg["s3"]["region"] = os.getenv("AWS_REGION", cfg["s3"].get("region", "us-east-1"))
+    cfg["s3"]["prefix"] = os.getenv("S3_PREFIX", cfg["s3"].get("prefix", "agents"))
+
+    # ---- registry (caché de runtimes de agente) ----
+    cfg["registry"]["ttl_seconds"] = int(
+        os.getenv("REGISTRY_TTL_SECONDS", cfg["registry"].get("ttl_seconds", 300))
+    )
+    cfg["registry"]["negative_ttl_seconds"] = int(
+        os.getenv(
+            "REGISTRY_NEGATIVE_TTL_SECONDS",
+            cfg["registry"].get("negative_ttl_seconds", 30),
+        )
+    )
+
+    # ---- openai (proveedor LLM; key solo por env) ----
+    openai_cfg = cfg["openai"]
     openai_cfg["api_key"] = os.getenv("OPENAI_API_KEY")  # sin default — None = fallback
-    openai_cfg["model"] = os.getenv(
-        "OPENAI_MODEL", openai_cfg.get("model", "gpt-4o-mini")
-    )
-    openai_cfg["embedding_model"] = os.getenv(
-        "OPENAI_EMBEDDING_MODEL",
-        openai_cfg.get("embedding_model", "text-embedding-3-small"),
-    )
     openai_cfg["base_url"] = os.getenv(
         "OPENAI_BASE_URL", openai_cfg.get("base_url", "https://api.openai.com/v1")
+    )
+    openai_cfg["embedding_model_fallback"] = os.getenv(
+        "OPENAI_EMBEDDING_MODEL_FALLBACK",
+        openai_cfg.get("embedding_model_fallback", "text-embedding-3-small"),
     )
 
     # ---- rate_limit ----

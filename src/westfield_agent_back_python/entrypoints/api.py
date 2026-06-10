@@ -1,160 +1,157 @@
 """
-Entrypoint HTTP — FastAPI app.
+Entrypoint HTTP — FastAPI app del runtime multi-agente.
 
-Es el composition root: al startup carga config, intenta cargar el índice
-RAG, construye los adapters (chat client + retriever) y los inyecta en el
-use case AskMaia. Los handlers de las rutas son delgados — sólo extraen
-el body, hacen rate limit y delegan en `app.state.ask_maia(body)`.
+Es el composition root: `create_app()` construye el storage S3, el
+AgentRegistry (carga lazy por agent_id con caché TTL) y el use case
+ChatWithAgent, y los cuelga de `app.state`. Los handlers son delgados —
+extraen el body, hacen rate limit y delegan.
 
-Endpoints (paridad de shape con el backend Node):
-  - GET  /api/health  → ping + info de runtime
-  - POST /api/maia    → orquesta el turno y devuelve MaiaResponse
+Endpoints:
+  - GET  /api/health                     → estado + agentes cargados
+  - GET  /api/agents/{agent_id}/health   → fuerza la carga de UN agente
+  - POST /api/agents/{agent_id}/chat     → un turno de conversación
+
+Mapeo de errores (aislado por agente):
+  - AgentNotFoundError → 404  (no existe config.json para ese agent_id)
+  - AgentLoadError     → 503  (config corrupta, prompt ausente, provider desconocido)
+  - rate limit         → 429
+  - vector store roto NO es error: el turno responde 200 con rag_used=false
+  - LLM caído NO es error: el turno responde 200 con fallback=true
+
+`create_app(storage=...)` permite inyectar un ObjectStorage fake en tests —
+ningún test toca AWS ni la red.
 """
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from westfield_agent_back_python.adapters.cosine_retriever import CosineRetriever
-from westfield_agent_back_python.adapters.index_file_loader import load_index_from_disk
-from westfield_agent_back_python.adapters.openai_chat_client import OpenAIChatClient
-from westfield_agent_back_python.adapters.openai_embeddings import OpenAIEmbeddings
-from westfield_agent_back_python.application.ask_maia import AskMaia
-from westfield_agent_back_python.application.fallback import build_fallback_response
-from westfield_agent_back_python.domain.responses import MaiaRequestBody, MaiaResponse
+from westfield_agent_back_python.adapters.llm_factory import ProviderSettings
+from westfield_agent_back_python.adapters.s3_object_storage import S3ObjectStorage
+from westfield_agent_back_python.application.agent_registry import AgentRegistry
+from westfield_agent_back_python.application.chat_with_agent import ChatWithAgent
+from westfield_agent_back_python.domain.chat import ChatRequest, ChatResponse
+from westfield_agent_back_python.domain.errors import AgentLoadError, AgentNotFoundError
+from westfield_agent_back_python.ports.object_storage import ObjectStorage
 from westfield_agent_back_python.shared.config import load_config
 from westfield_agent_back_python.shared.logger import get_logger
 from westfield_agent_back_python.shared.rate_limit import RateLimiter
 
 log = get_logger("westfield_agent_back_python.api")
 
-cfg = load_config()
-service_name = cfg["project"].get("name", "westfield-agent-back-python")
-app = FastAPI(title=service_name, version="0.1.0")
 
-# CORS — mismos orígenes que el backend Node.
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=cfg["service"]["cors_origins"],
-    allow_credentials=False,
-    allow_methods=["GET", "POST"],
-    allow_headers=["Content-Type", "Authorization"],
-)
+def create_app(
+    *,
+    storage: ObjectStorage | None = None,
+    config: dict[str, Any] | None = None,
+) -> FastAPI:
+    """Composition root. `storage`/`config` inyectables para tests."""
+    cfg = config or load_config()
+    service_name = cfg["project"].get("name", "westfield-agent-back-python")
 
-# Rate limit instance — única por proceso.
-_rate_limiter = RateLimiter(
-    window_seconds=cfg["rate_limit"]["window_seconds"],
-    max_requests=cfg["rate_limit"]["max_requests"],
-)
+    if storage is None:
+        storage = S3ObjectStorage(bucket=cfg["s3"]["bucket"], region=cfg["s3"]["region"])
 
-
-@app.on_event("startup")
-async def _startup() -> None:
-    """
-    Composition root: arma todas las dependencias y las inyecta en el use case.
-
-    Estrategia:
-      - Chat client: siempre creado si hay OPENAI_API_KEY. Sin key → None y
-        el use case degrada a fallback offline.
-      - RAG: best-effort. Si falta el índice o no se puede leer, el servicio
-        igual arranca, sólo que sin contexto RAG (prompt base + fallback).
-    """
-    openai_cfg = cfg["maia"]["openai"]
-    api_key = openai_cfg.get("api_key")
-
-    # 1) Chat client
-    chat_client = None
-    if api_key:
-        chat_client = OpenAIChatClient(
-            api_key=api_key,
-            model=openai_cfg["model"],
-            base_url=openai_cfg["base_url"],
-        )
-        log.info(f"🟢 Chat client listo — modelo: {openai_cfg['model']}")
-    else:
-        log.warning("🟡 Sin OPENAI_API_KEY → /api/maia opera en modo fallback offline.")
-
-    # 2) RAG (índice + retriever)
-    retriever = None
-    always_include = []
-    rag_info = None
-    try:
-        index = load_index_from_disk(cfg["maia"]["index_path"])
-        always_include = index.always_include
-        rag_info = {
-            "name": index.name,
-            "chunks": len(index.chunks),
-            "always_include": len(always_include),
-            "embedding_model": index.embedding_model,
-            "generated_at": index.generated_at,
-        }
-        if api_key:
-            embeddings = OpenAIEmbeddings(
-                api_key=api_key,
-                model=openai_cfg["embedding_model"],
-                base_url=openai_cfg["base_url"],
-            )
-            retriever = CosineRetriever(index=index, embeddings=embeddings)
-        log.info(
-            f"🧠 RAG cargado: contexto \"{index.name}\" · "
-            f"{len(index.chunks)} chunks · {len(always_include)} always_include "
-            f"({index.embedding_model})"
-        )
-    except Exception as err:
-        log.warning(f"✗ RAG no cargó — Maia arranca SIN índice: {err}")
-
-    # 3) Use case con dependencias inyectadas
-    app.state.ask_maia = AskMaia(
-        chat_client=chat_client,
-        retriever=retriever,
-        always_include_docs=always_include,
+    provider_settings = ProviderSettings(
+        api_keys={"openai": cfg["openai"].get("api_key")},
+        base_urls={"openai": cfg["openai"].get("base_url", "https://api.openai.com/v1")},
     )
-    app.state.rag_info = rag_info
-    app.state.openai_configured = bool(api_key)
-    app.state.openai_model = openai_cfg["model"]
+    if not cfg["openai"].get("api_key"):
+        log.warning("🟡 Sin OPENAI_API_KEY → los agentes openai responderán su fallback_message.")
 
-    host = cfg["service"]["host"]
-    port = cfg["service"]["port"]
-    log.info(f"🟢 Maia API listening on http://{host}:{port}")
+    registry = AgentRegistry(
+        storage=storage,
+        prefix=cfg["s3"]["prefix"],
+        provider_settings=provider_settings,
+        embedding_model_fallback=cfg["openai"]["embedding_model_fallback"],
+        ttl_seconds=cfg["registry"]["ttl_seconds"],
+        negative_ttl_seconds=cfg["registry"]["negative_ttl_seconds"],
+    )
+    chat_with_agent = ChatWithAgent(registry=registry)
+    rate_limiter = RateLimiter(
+        window_seconds=cfg["rate_limit"]["window_seconds"],
+        max_requests=cfg["rate_limit"]["max_requests"],
+    )
 
+    app = FastAPI(title=service_name, version="0.2.0")
+    app.state.registry = registry
+    app.state.chat_with_agent = chat_with_agent
 
-@app.get("/api/health")
-async def health() -> dict:
-    """Ping + info de runtime — paridad con el backend Node."""
-    return {
-        "ok": True,
-        "openaiConfigured": bool(getattr(app.state, "openai_configured", False)),
-        "model": getattr(app.state, "openai_model", "gpt-4o-mini"),
-        "rag": getattr(app.state, "rag_info", None),
-        "runtime": "python",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-    }
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=cfg["service"]["cors_origins"],
+        allow_credentials=False,
+        allow_methods=["GET", "POST"],
+        allow_headers=["Content-Type", "Authorization"],
+    )
 
+    # ------------------------------------------------------------- handlers
 
-@app.post("/api/maia", response_model=MaiaResponse)
-async def maia(body: MaiaRequestBody, request: Request) -> MaiaResponse:
-    """Orquesta un turno del agente con rate limit por IP."""
-    ip = _extract_ip(request)
-    if _rate_limiter.hit(ip):
-        raise HTTPException(
-            status_code=429,
-            detail="Demasiadas solicitudes. Espera un minuto y vuelve a intentar.",
-        )
+    @app.get("/api/health")
+    async def health() -> dict:
+        """Ping + snapshot de los agentes cargados en esta instancia."""
+        return {
+            "ok": True,
+            "runtime": "python",
+            "s3_bucket": cfg["s3"]["bucket"],
+            "agents": registry.snapshot(),
+            "timestamp": datetime.now(UTC).isoformat(),
+        }
 
-    ask_maia: AskMaia = app.state.ask_maia
-    try:
-        return await ask_maia(body)
-    except Exception:
-        # askMaia ya tiene fallback interno; este except es la red final por
-        # si algo escapó (bug). Degradamos visiblemente para no romper la demo.
-        log.exception("askMaia tiró pese al try interno — devuelvo fallback")
-        fb = build_fallback_response(body.history or [])
-        fb.message = f"[error inesperado en el servidor] {fb.message}"
-        return fb
+    @app.get("/api/agents/{agent_id}/health")
+    async def agent_health(agent_id: str) -> dict:
+        """Fuerza la carga del agente y reporta su estado (404/503 si falla)."""
+        runtime = await registry.get(agent_id)  # mapea errores el exception handler
+        return {
+            "agent_id": agent_id,
+            "ok": True,
+            "agent_name": runtime.config.agent_name,
+            "degraded": runtime.degraded,
+            "llm_provider": runtime.config.llm_provider,
+            "llm_model": runtime.config.llm_model,
+            "prompt_id": runtime.config.prompt_id,
+            "vector_store_id": runtime.config.vector_store_id,
+            "chunks": runtime.chunk_count,
+        }
+
+    @app.post("/api/agents/{agent_id}/chat", response_model=ChatResponse)
+    async def chat(agent_id: str, body: ChatRequest, request: Request) -> ChatResponse:
+        """Un turno de conversación con el agente, con rate limit por IP+agente."""
+        ip = _extract_ip(request)
+        if rate_limiter.hit(f"{ip}:{agent_id}"):
+            raise HTTPException(
+                status_code=429,
+                detail="Demasiadas solicitudes. Espera un minuto y vuelve a intentar.",
+            )
+        return await chat_with_agent(agent_id, body)
+
+    # ------------------------------------------------- mapeo de errores HTTP
+
+    @app.exception_handler(AgentNotFoundError)
+    async def agent_not_found_handler(_: Request, exc: AgentNotFoundError) -> JSONResponse:
+        return JSONResponse(status_code=404, content={"error": str(exc)})
+
+    @app.exception_handler(AgentLoadError)
+    async def agent_load_error_handler(_: Request, exc: AgentLoadError) -> JSONResponse:
+        log.error(f"✗ {exc}")
+        return JSONResponse(status_code=503, content={"error": str(exc)})
+
+    # Mismo shape de error que el resto ({"error": ...}) en vez del default
+    # de FastAPI ({"detail": ...}).
+    @app.exception_handler(HTTPException)
+    async def http_exception_handler(_: Request, exc: HTTPException) -> JSONResponse:
+        return JSONResponse(status_code=exc.status_code, content={"error": exc.detail})
+
+    log.info(
+        f"🟢 Runtime multi-agente listo — bucket s3://{cfg['s3']['bucket']}/"
+        f"{cfg['s3']['prefix']}/ · TTL {cfg['registry']['ttl_seconds']}s"
+    )
+    return app
 
 
 def _extract_ip(request: Request) -> str:
@@ -170,8 +167,5 @@ def _extract_ip(request: Request) -> str:
     return "local"
 
 
-# Handler global para devolver el mismo shape de error que el Node, en lugar
-# del default de FastAPI ({"detail": "..."}).
-@app.exception_handler(HTTPException)
-async def http_exception_handler(_: Request, exc: HTTPException) -> JSONResponse:
-    return JSONResponse(status_code=exc.status_code, content={"error": exc.detail})
+# Instancia module-level que levanta uvicorn (`main_api.py`).
+app = create_app()

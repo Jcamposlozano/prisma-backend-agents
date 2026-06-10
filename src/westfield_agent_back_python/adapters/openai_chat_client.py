@@ -1,24 +1,22 @@
 """
 Adapter: cliente OpenAI Chat Completions.
 
-Hace el POST a /chat/completions con response_format=json_object, extrae el
-text del primer choice y delega al safe_parse_maia_json para obtener un
-MaiaResponse validado.
+Hace el POST a /chat/completions y devuelve el texto crudo del primer
+choice. Los parámetros de generación (model/temperature/max_tokens/
+response_format) vienen del config.json del agente — el AgentRegistry
+construye UNA instancia por agente vía adapters/llm_factory.py.
 
-Parámetros (temperature/top_p/max_tokens) iguales al backend Node para
-mantener paridad de salida.
-
-Port de la función callOpenAI() en Westfield_agent/server/maia-core.ts.
+El parsing del output (json/text) NO vive acá — ver
+application/sanitizers.parse_llm_output. Así este adapter queda como
+transporte puro y es intercambiable por otro proveedor.
 """
 
 from __future__ import annotations
 
+from typing import Literal
+
 import httpx
 
-from westfield_agent_back_python.application.sanitizers import safe_parse_maia_json
-from westfield_agent_back_python.domain.responses import MaiaResponse
-
-DEFAULT_MODEL = "gpt-4o-mini"
 DEFAULT_BASE_URL = "https://api.openai.com/v1"
 
 
@@ -29,8 +27,11 @@ class OpenAIChatClient:
         self,
         *,
         api_key: str,
-        model: str = DEFAULT_MODEL,
+        model: str,
         base_url: str = DEFAULT_BASE_URL,
+        temperature: float = 0.6,
+        max_tokens: int = 800,
+        response_format: Literal["json", "text"] = "text",
         timeout_seconds: float = 60.0,
     ) -> None:
         if not api_key:
@@ -38,17 +39,21 @@ class OpenAIChatClient:
         self._api_key = api_key
         self._model = model
         self._base_url = base_url.rstrip("/")
+        self._temperature = temperature
+        self._max_tokens = max_tokens
+        self._response_format = response_format
         self._timeout = timeout_seconds
 
-    async def chat(self, messages: list[dict[str, str]]) -> MaiaResponse:
-        payload = {
+    async def chat(self, messages: list[dict[str, str]]) -> str:
+        payload: dict = {
             "model": self._model,
             "messages": messages,
-            "temperature": 0.6,
+            "temperature": self._temperature,
             "top_p": 0.95,
-            "max_tokens": 800,
-            "response_format": {"type": "json_object"},
+            "max_tokens": self._max_tokens,
         }
+        if self._response_format == "json":
+            payload["response_format"] = {"type": "json_object"}
 
         async with httpx.AsyncClient(timeout=self._timeout) as client:
             res = await client.post(
@@ -74,4 +79,4 @@ class OpenAIChatClient:
         if not text:
             raise RuntimeError("Respuesta vacía de OpenAI")
 
-        return safe_parse_maia_json(text)
+        return text
