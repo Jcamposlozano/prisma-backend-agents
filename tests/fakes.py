@@ -124,6 +124,7 @@ def build_agent_fixture(
     storage: FakeObjectStorage,
     agent_id: str,
     *,
+    prefix: str = "agents",
     system_prompt: str = "Sos un agente de prueba. Respondé en español.",
     vectors: list[list[float]] | None = None,
     chunks: list[dict] | None = None,
@@ -137,7 +138,7 @@ def build_agent_fixture(
     un vector store FAISS REAL (IndexFlatIP serializado) consistente con el
     contrato — mismo camino de deserialización que producción.
     """
-    prefix = f"agents/{agent_id}"
+    prefix = f"{prefix.strip('/')}/{agent_id}"
     config: dict[str, Any] = {
         "agent_id": agent_id,
         "agent_name": agent_id.title(),
@@ -187,6 +188,7 @@ def build_agent_fixture(
 def make_registry(
     storage: ObjectStorage,
     *,
+    prefix: str = "agents",
     api_keys: dict[str, str | None] | None = None,
     ttl: int = 300,
     negative_ttl: int = 30,
@@ -194,7 +196,7 @@ def make_registry(
 ) -> AgentRegistry:
     return AgentRegistry(
         storage=storage,
-        prefix="agents",
+        prefix=prefix,
         provider_settings=ProviderSettings(api_keys=api_keys or {}),
         embedding_model_fallback="text-embedding-3-small",
         ttl_seconds=ttl,

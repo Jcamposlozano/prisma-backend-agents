@@ -7,12 +7,13 @@ la configuración, el prompt y la base vectorial FAISS de cada agente según el
 ni microservicio nuevo, ni cambios de código — solo publicar archivos en S3
 (ver repo hermano `Westfield_agent_ingest_python`).
 
-Rutas según la convención del gateway de la plataforma (`/api/v1/universities/{university_id}/...`;
-el segmento `{university_id}` se valida contra `UNIVERSITY_ID`, default `westfield` — otro valor → 404):
+Rutas según la convención del gateway de la plataforma. El segmento `{university_code}` es
+**dinámico** (multi-tenant): se mapea al prefijo S3 del tenant (`org={university_code}/agents`)
+en cada request — una universidad nueva es una carpeta nueva en el bucket, sin tocar código:
 
 - `GET  /api/v1/health` — estado + agentes cargados en la instancia.
-- `GET  /api/v1/universities/{university_id}/agents/{agent_id}/health` — fuerza la carga de un agente y reporta su estado.
-- `POST /api/v1/universities/{university_id}/agents/{agent_id}/chat` — un turno de conversación.
+- `GET  /api/v1/universities/{university_code}/agents/{agent_id}/health` — fuerza la carga de un agente y reporta su estado.
+- `POST /api/v1/universities/{university_code}/agents/{agent_id}/chat` — un turno de conversación.
 
 La **generación de embeddings está desacoplada**: este runtime solo embebe la
 query de cada turno; los documentos los procesa el servicio de ingesta
@@ -192,7 +193,7 @@ Al cargar valida `index.ntotal == len(chunks)` y `index.d == embedding_dimension
 ### Endpoint conversacional
 
 ```
-POST /api/v1/universities/{university_id}/agents/{agent_id}/chat
+POST /api/v1/universities/{university_code}/agents/{agent_id}/chat
 ```
 
 Request:
@@ -230,7 +231,7 @@ Response 200:
 
 | Situación | Respuesta |
 |---|---|
-| `university_id` distinto al configurado | `404 {"error": "..."}` |
+| `university_code` con slug inválido o sin agentes | `404 {"error": "..."}` |
 | `agent_id` inexistente | `404 {"error": "..."}` |
 | agente roto (config corrupta, prompt ausente, provider desconocido) | `503 {"error": "..."}` |
 | rate limit (por IP+agente) | `429 {"error": "..."}` |
@@ -258,10 +259,9 @@ El fallo de un agente **jamás** afecta a otros agentes de la misma instancia.
 
 | Var | Default | Notas |
 |---|---|---|
-| `UNIVERSITY_ID` | `westfield` | Tenant de las rutas `/api/v1/universities/<id>/...`. |
 | `S3_BUCKET` | `westfield-agent-knowledge` | Bucket de conocimiento. |
 | `AWS_REGION` | `us-east-1` | Región del bucket. |
-| `S3_PREFIX` | `agents` | Prefijo raíz de los agentes. |
+| `S3_PREFIX` | `org={university_code}/agents` | Template multi-tenant; el placeholder se resuelve POR REQUEST con el segmento de la ruta. |
 | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | — | Cadena estándar de boto3 (o perfil/rol IAM). |
 | `REGISTRY_TTL_SECONDS` | `300` (`30` en dev) | TTL del caché de agentes. |
 | `REGISTRY_NEGATIVE_TTL_SECONDS` | `30` | Caché negativa de agent_ids inexistentes. |

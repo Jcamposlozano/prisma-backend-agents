@@ -1,23 +1,23 @@
 """
-Entrypoint HTTP — FastAPI app del runtime multi-agente.
+Entrypoint HTTP — FastAPI app del runtime multi-agente y multi-tenant.
 
 Es el composition root: `create_app()` construye el storage S3, el
-AgentRegistry (carga lazy por agent_id con caché TTL) y el use case
-ChatWithAgent, y los cuelga de `app.state`. Los handlers son delgados —
-extraen el body, hacen rate limit y delegan.
+AgentRegistry (carga lazy por (university_code, agent_id) con caché TTL) y
+el use case ChatWithAgent, y los cuelga de `app.state`. Los handlers son
+delgados — extraen el body, hacen rate limit y delegan.
 
-Endpoints (convención del gateway: /api/v1/universities/{university_id}/...):
-  - GET  /api/v1/health                                                → estado + agentes cargados
-  - GET  /api/v1/universities/{university_id}/agents/{agent_id}/health → fuerza la carga de UN agente
-  - POST /api/v1/universities/{university_id}/agents/{agent_id}/chat   → un turno de conversación
+Endpoints (convención del gateway de la plataforma):
+  - GET  /api/v1/health                                                  → estado + agentes cargados
+  - GET  /api/v1/universities/{university_code}/agents/{agent_id}/health → fuerza la carga de UN agente
+  - POST /api/v1/universities/{university_code}/agents/{agent_id}/chat   → un turno de conversación
 
-El segmento {university_id} se valida contra service.university_id de la
-config (env UNIVERSITY_ID, default "westfield") — otro valor responde 404.
-Es el tenant fijo de esta instancia; multi-tenant real queda como evolución
-sin romper las URLs.
+El segmento {university_code} es DINÁMICO: se mapea al prefijo S3 del tenant
+(s3.prefix con placeholder, ej. "org={university_code}/agents") en cada
+request. Una universidad nueva = una carpeta nueva en el bucket, sin tocar
+código ni configuración.
 
 Mapeo de errores (aislado por agente):
-  - universidad desconocida → 404
+  - UniversityNotFoundError → 404 (slug inválido)
   - AgentNotFoundError → 404  (no existe config.json para ese agent_id)
   - AgentLoadError     → 503  (config corrupta, prompt ausente, provider desconocido)
   - rate limit         → 429
@@ -33,7 +33,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import APIRouter, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -42,7 +42,11 @@ from westfield_agent_back_python.adapters.s3_object_storage import S3ObjectStora
 from westfield_agent_back_python.application.agent_registry import AgentRegistry
 from westfield_agent_back_python.application.chat_with_agent import ChatWithAgent
 from westfield_agent_back_python.domain.chat import ChatRequest, ChatResponse
-from westfield_agent_back_python.domain.errors import AgentLoadError, AgentNotFoundError
+from westfield_agent_back_python.domain.errors import (
+    AgentLoadError,
+    AgentNotFoundError,
+    UniversityNotFoundError,
+)
 from westfield_agent_back_python.ports.object_storage import ObjectStorage
 from westfield_agent_back_python.shared.config import load_config
 from westfield_agent_back_python.shared.logger import get_logger
@@ -98,35 +102,28 @@ def create_app(
 
     # ------------------------------------------------------------- handlers
 
-    tenant = cfg["service"].get("university_id", "westfield")
-
-    def _check_university(university_id: str) -> None:
-        """El tenant de esta instancia es fijo — otro segmento responde 404."""
-        if university_id != tenant:
-            raise HTTPException(
-                status_code=404,
-                detail=f"universidad '{university_id}' no encontrada",
-            )
-
     @app.get("/api/v1/health")
     async def health() -> dict:
         """Ping + snapshot de los agentes cargados en esta instancia."""
         return {
             "ok": True,
             "runtime": "python",
-            "university": tenant,
             "s3_bucket": cfg["s3"]["bucket"],
             "agents": registry.snapshot(),
             "timestamp": datetime.now(UTC).isoformat(),
         }
 
-    @app.get("/api/v1/universities/{university_id}/agents/{agent_id}/health")
-    async def agent_health(university_id: str, agent_id: str) -> dict:
+    router = APIRouter(
+        prefix="/api/v1/universities/{university_code}/agents",
+        tags=["Agents"],
+    )
+
+    @router.get("/{agent_id}/health")
+    async def agent_health(university_code: str, agent_id: str) -> dict:
         """Fuerza la carga del agente y reporta su estado (404/503 si falla)."""
-        _check_university(university_id)
-        runtime = await registry.get(agent_id)  # mapea errores el exception handler
+        runtime = await registry.get(university_code, agent_id)
         return {
-            "university": university_id,
+            "university": university_code,
             "agent_id": agent_id,
             "ok": True,
             "agent_name": runtime.config.agent_name,
@@ -138,24 +135,28 @@ def create_app(
             "chunks": runtime.chunk_count,
         }
 
-    @app.post(
-        "/api/v1/universities/{university_id}/agents/{agent_id}/chat",
-        response_model=ChatResponse,
-    )
+    @router.post("/{agent_id}/chat", response_model=ChatResponse)
     async def chat(
-        university_id: str, agent_id: str, body: ChatRequest, request: Request
+        university_code: str, agent_id: str, body: ChatRequest, request: Request
     ) -> ChatResponse:
-        """Un turno de conversación con el agente, con rate limit por IP+agente."""
-        _check_university(university_id)
+        """Un turno de conversación con el agente, con rate limit por IP+tenant+agente."""
         ip = _extract_ip(request)
-        if rate_limiter.hit(f"{ip}:{agent_id}"):
+        if rate_limiter.hit(f"{ip}:{university_code}:{agent_id}"):
             raise HTTPException(
                 status_code=429,
                 detail="Demasiadas solicitudes. Espera un minuto y vuelve a intentar.",
             )
-        return await chat_with_agent(agent_id, body)
+        return await chat_with_agent(university_code, agent_id, body)
+
+    app.include_router(router)
 
     # ------------------------------------------------- mapeo de errores HTTP
+
+    @app.exception_handler(UniversityNotFoundError)
+    async def university_not_found_handler(
+        _: Request, exc: UniversityNotFoundError
+    ) -> JSONResponse:
+        return JSONResponse(status_code=404, content={"error": str(exc)})
 
     @app.exception_handler(AgentNotFoundError)
     async def agent_not_found_handler(_: Request, exc: AgentNotFoundError) -> JSONResponse:

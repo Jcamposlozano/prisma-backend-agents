@@ -62,9 +62,12 @@ class ChatWithAgent:
     def __init__(self, *, registry: AgentRegistry) -> None:
         self._registry = registry
 
-    async def __call__(self, agent_id: str, body: ChatRequest) -> ChatResponse:
-        # 1) Resolver el agente (puede tirar AgentNotFoundError/AgentLoadError).
-        runtime = await self._registry.get(agent_id)
+    async def __call__(
+        self, university_code: str, agent_id: str, body: ChatRequest
+    ) -> ChatResponse:
+        # 1) Resolver el agente del tenant (puede tirar UniversityNotFoundError/
+        #    AgentNotFoundError/AgentLoadError).
+        runtime = await self._registry.get(university_code, agent_id)
         config = runtime.config
 
         # 2) Clamps defensivos.

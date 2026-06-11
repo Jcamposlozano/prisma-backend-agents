@@ -18,6 +18,14 @@ class ObjectNotFoundError(Exception):
         self.key = key
 
 
+class UniversityNotFoundError(Exception):
+    """El university_code de la ruta no es un slug válido."""
+
+    def __init__(self, university_code: str) -> None:
+        super().__init__(f"universidad '{university_code}' no encontrada")
+        self.university_code = university_code
+
+
 class AgentNotFoundError(Exception):
     """No existe config.json para ese agent_id (o el id es inválido)."""
 

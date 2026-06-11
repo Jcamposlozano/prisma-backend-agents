@@ -80,6 +80,6 @@ async def test_provider_fake_registrado_funciona_end_to_end(monkeypatch) -> None
     build_agent_fixture(storage, "tutor", config_overrides={"llm_provider": "fake"})
     registry = make_registry(storage)
 
-    rt = await registry.get("tutor")
+    rt = await registry.get("westfield", "tutor")
     assert rt.chat_client is fake_chat
     assert await rt.chat_client.chat([]) == "hola desde el provider fake"

@@ -83,9 +83,6 @@ def load_config(config_dir: str = "configs") -> dict[str, Any]:
     # ---- service ----
     cfg["service"]["host"] = os.getenv("HOST", cfg["service"].get("host", "0.0.0.0"))
     cfg["service"]["port"] = int(os.getenv("PORT", cfg["service"].get("port", 8000)))
-    cfg["service"]["university_id"] = os.getenv(
-        "UNIVERSITY_ID", cfg["service"].get("university_id", "westfield")
-    )
     cfg["service"].setdefault("cors_origins", ["http://localhost:5173"])
 
     # ---- worker ----
@@ -101,7 +98,11 @@ def load_config(config_dir: str = "configs") -> dict[str, Any]:
         "S3_BUCKET", cfg["s3"].get("bucket", "westfield-agent-knowledge")
     )
     cfg["s3"]["region"] = os.getenv("AWS_REGION", cfg["s3"].get("region", "us-east-1"))
-    cfg["s3"]["prefix"] = os.getenv("S3_PREFIX", cfg["s3"].get("prefix", "agents"))
+    # Template multi-tenant: el placeholder {university_code} lo resuelve el
+    # AgentRegistry POR REQUEST con el segmento de la ruta.
+    cfg["s3"]["prefix"] = os.getenv(
+        "S3_PREFIX", cfg["s3"].get("prefix", "org={university_code}/agents")
+    )
 
     # ---- registry (caché de runtimes de agente) ----
     cfg["registry"]["ttl_seconds"] = int(

@@ -22,6 +22,7 @@ from westfield_agent_back_python.application.chat_with_agent import (
 from westfield_agent_back_python.domain.chat import ChatRequest, ChatTurn
 
 VECTORS = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
+U = "westfield"
 
 
 def _request(message: str = "hola", **kwargs) -> ChatRequest:
@@ -59,7 +60,7 @@ async def test_happy_path_json_con_structured_passthrough(monkeypatch) -> None:
     chat = FakeChatClient(reply=reply)
     use_case = _setup(monkeypatch, chat=chat, config_overrides={"response_format": "json"})
 
-    res = await use_case("tutor", _request())
+    res = await use_case(U, "tutor", _request())
     assert res.agent_id == "tutor"
     assert res.conversation_id == "c1"
     assert res.message == "Hola estudiante"
@@ -74,7 +75,7 @@ async def test_response_format_text_sin_structured(monkeypatch) -> None:
     chat = FakeChatClient(reply="respuesta plana")
     use_case = _setup(monkeypatch, chat=chat)
 
-    res = await use_case("tutor", _request())
+    res = await use_case(U, "tutor", _request())
     assert res.message == "respuesta plana"
     assert res.structured is None
 
@@ -85,7 +86,7 @@ async def test_retriever_roto_sigue_sin_rag(monkeypatch) -> None:
         monkeypatch, chat=chat, embeddings=FakeEmbeddings(error=RuntimeError("api caída"))
     )
 
-    res = await use_case("tutor", _request())
+    res = await use_case(U, "tutor", _request())
     assert res.rag_used is False
     assert res.sources == []
     assert res.fallback is False
@@ -98,7 +99,7 @@ async def test_llm_roto_devuelve_fallback_del_agente(monkeypatch) -> None:
         monkeypatch, chat=chat, config_overrides={"fallback_message": "Volvé en un rato."}
     )
 
-    res = await use_case("tutor", _request())
+    res = await use_case(U, "tutor", _request())
     assert res.fallback is True
     assert res.message == "Volvé en un rato."
     assert res.rag_used is False
@@ -110,7 +111,7 @@ async def test_sin_chat_client_devuelve_fallback_default(monkeypatch) -> None:
     registry = make_registry(storage, api_keys={})
     use_case = ChatWithAgent(registry=registry)
 
-    res = await use_case("tutor", _request())
+    res = await use_case(U, "tutor", _request())
     assert res.fallback is True
     assert res.message == DEFAULT_FALLBACK_MESSAGE
 
@@ -128,7 +129,7 @@ async def test_leak_marker_reemplaza_message_y_structured(monkeypatch) -> None:
         },
     )
 
-    res = await use_case("tutor", _request())
+    res = await use_case(U, "tutor", _request())
     assert res.message == "No comparto material interno."
     assert res.structured["message"] == "No comparto material interno."
     assert res.structured["rubric_level"] == "pobre"  # el resto se preserva
@@ -139,7 +140,7 @@ async def test_sources_excluyen_chunks_instructor_only(monkeypatch) -> None:
     chunks = [make_chunk(0, instructor_only=True), make_chunk(1), make_chunk(2)]
     use_case = _setup(monkeypatch, chat=chat, chunks=chunks)
 
-    res = await use_case("tutor", _request())
+    res = await use_case(U, "tutor", _request())
     assert res.rag_used is True  # el chunk sí se usó como contexto...
     assert res.sources == []  # ...pero no se expone su metadata
 
@@ -152,7 +153,7 @@ async def test_clamps_history_y_message(monkeypatch) -> None:
         ChatTurn(role="user" if i % 2 == 0 else "assistant", content=f"turno {i}")
         for i in range(50)
     ]
-    res = await use_case("tutor", _request(message="x" * 10_000, history=history))
+    res = await use_case(U, "tutor", _request(message="x" * 10_000, history=history))
     assert res.message == "ok"
 
     sent = chat.calls[0]
@@ -167,7 +168,7 @@ async def test_primer_turno_sin_mensaje_inyecta_apertura(monkeypatch) -> None:
     chat = FakeChatClient(reply="¡Bienvenido!")
     use_case = _setup(monkeypatch, chat=chat, with_rag=False)
 
-    res = await use_case("tutor", _request(message=""))
+    res = await use_case(U, "tutor", _request(message=""))
     assert res.message == "¡Bienvenido!"
     assert chat.calls[0][-1] == {"role": "user", "content": "Hola, vamos a empezar."}
 
@@ -192,11 +193,11 @@ async def test_hard_rules_fuerzan_flags_del_structured(monkeypatch) -> None:
         },
     )
 
-    res = await use_case("tutor", _request(state={"turns_for_current_question": 4}))
+    res = await use_case(U, "tutor", _request(state={"turns_for_current_question": 4}))
     assert res.structured["advance_to_next_question"] is True
 
     # Con N bajo, la regla no aplica y manda lo que dijo el modelo.
-    res2 = await use_case("tutor", _request(state={"turns_for_current_question": 1}))
+    res2 = await use_case(U, "tutor", _request(state={"turns_for_current_question": 1}))
     assert res2.structured["advance_to_next_question"] is False
 
 
@@ -204,7 +205,7 @@ async def test_state_llega_al_system_prompt(monkeypatch) -> None:
     chat = FakeChatClient(reply="ok")
     use_case = _setup(monkeypatch, chat=chat, with_rag=False)
 
-    await use_case("tutor", _request(state={"current_question": 2}))
+    await use_case(U, "tutor", _request(state={"current_question": 2}))
     system = chat.calls[0][0]["content"]
     assert "# Estado actual" in system
     assert "- current_question = 2" in system

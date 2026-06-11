@@ -41,6 +41,7 @@ from westfield_agent_back_python.domain.errors import (
     AgentLoadError,
     AgentNotFoundError,
     ObjectNotFoundError,
+    UniversityNotFoundError,
 )
 from westfield_agent_back_python.domain.rag import AlwaysIncludeDoc
 from westfield_agent_back_python.ports.chat_client import ChatClient
@@ -50,8 +51,9 @@ from westfield_agent_back_python.shared.logger import get_logger
 
 log = get_logger("westfield_agent_back_python.agent_registry")
 
-# agent_id válido: minúsculas/dígitos/guiones — evita path traversal en keys S3.
-_AGENT_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
+# Slugs válidos (university_code y agent_id): minúsculas/dígitos/guiones —
+# evita path traversal en keys S3.
+_SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 
 
 @dataclass
@@ -75,7 +77,15 @@ class _CacheEntry:
 
 
 class AgentRegistry:
-    """Caché de AgentRuntime por agent_id, con TTL y locks por agente."""
+    """
+    Caché de AgentRuntime por (university_code, agent_id), con TTL y locks.
+
+    Multi-tenant: el `prefix` admite el placeholder {university_code}, que se
+    sustituye POR REQUEST con el segmento de la ruta — cada universidad vive
+    bajo su propio prefijo S3 (ej. org=westfield/agents). Un prefijo sin
+    placeholder se comporta como single-tenant (todas las universidades
+    comparten el mismo árbol).
+    """
 
     def __init__(
         self,
@@ -89,55 +99,61 @@ class AgentRegistry:
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._storage = storage
-        self._prefix = prefix.strip("/")
+        self._prefix_template = prefix.strip("/")
         self._settings = provider_settings
         self._embedding_model_fallback = embedding_model_fallback
         self._ttl = ttl_seconds
         self._negative_ttl = negative_ttl_seconds
         self._clock = clock
 
+        # Todas las estructuras se indexan por "university:agent".
         self._entries: dict[str, _CacheEntry] = {}
-        self._negative: dict[str, float] = {}  # agent_id → expires_at
+        self._negative: dict[str, float] = {}  # key → expires_at
         self._locks: dict[str, asyncio.Lock] = {}
 
     # ------------------------------------------------------------------ API
 
-    async def get(self, agent_id: str) -> AgentRuntime:
+    async def get(self, university_code: str, agent_id: str) -> AgentRuntime:
         """
-        Devuelve el runtime del agente, cargándolo desde S3 si hace falta.
+        Devuelve el runtime del agente de esa universidad, cargándolo desde
+        S3 si hace falta.
 
-        raises AgentNotFoundError | AgentLoadError (solo de ESTE agente).
+        raises UniversityNotFoundError | AgentNotFoundError | AgentLoadError
+        (solo de ESTE agente — jamás contagia a otros).
         """
-        if not _AGENT_ID_RE.match(agent_id or ""):
+        if not _SLUG_RE.match(university_code or ""):
+            raise UniversityNotFoundError(university_code)
+        if not _SLUG_RE.match(agent_id or ""):
             raise AgentNotFoundError(agent_id)
 
+        key = f"{university_code}:{agent_id}"
         now = self._clock()
 
-        entry = self._entries.get(agent_id)
+        entry = self._entries.get(key)
         if entry and entry.expires_at > now:
             return entry.runtime
 
-        neg_expires = self._negative.get(agent_id)
+        neg_expires = self._negative.get(key)
         if neg_expires and neg_expires > now:
             raise AgentNotFoundError(agent_id)
 
-        lock = self._locks.setdefault(agent_id, asyncio.Lock())
+        lock = self._locks.setdefault(key, asyncio.Lock())
         async with lock:
             # Double-check: otro request pudo cargar mientras esperábamos el lock.
             now = self._clock()
-            entry = self._entries.get(agent_id)
+            entry = self._entries.get(key)
             if entry and entry.expires_at > now:
                 return entry.runtime
-            neg_expires = self._negative.get(agent_id)
+            neg_expires = self._negative.get(key)
             if neg_expires and neg_expires > now:
                 raise AgentNotFoundError(agent_id)
 
             try:
-                runtime = await asyncio.to_thread(self._load_sync, agent_id)
+                runtime = await asyncio.to_thread(self._load_sync, university_code, agent_id)
             except AgentNotFoundError:
                 # El agente ya no existe — descartar stale y cachear en negativo.
-                self._entries.pop(agent_id, None)
-                self._negative[agent_id] = self._clock() + self._negative_ttl
+                self._entries.pop(key, None)
+                self._negative[key] = self._clock() + self._negative_ttl
                 raise
             except Exception as err:
                 if entry is not None:
@@ -145,36 +161,39 @@ class AgentRegistry:
                     # reintentar pasado un backoff corto.
                     entry.expires_at = self._clock() + self._negative_ttl
                     log.warning(
-                        f"🟡 Recarga de '{agent_id}' falló ({err}) — sirviendo versión stale."
+                        f"🟡 Recarga de '{key}' falló ({err}) — sirviendo versión stale."
                     )
                     return entry.runtime
                 if isinstance(err, AgentLoadError):
                     raise
                 raise AgentLoadError(agent_id, str(err)) from err
 
-            self._negative.pop(agent_id, None)
-            self._entries[agent_id] = _CacheEntry(
+            self._negative.pop(key, None)
+            self._entries[key] = _CacheEntry(
                 runtime=runtime, expires_at=self._clock() + self._ttl
             )
             return runtime
 
-    def invalidate(self, agent_id: str | None = None) -> None:
-        """Descarta entradas cacheadas (todas si agent_id es None)."""
-        if agent_id is None:
+    def invalidate(self, university_code: str | None = None, agent_id: str | None = None) -> None:
+        """Descarta entradas cacheadas (todas si no se pasa universidad+agente)."""
+        if university_code is None or agent_id is None:
             self._entries.clear()
             self._negative.clear()
         else:
-            self._entries.pop(agent_id, None)
-            self._negative.pop(agent_id, None)
+            key = f"{university_code}:{agent_id}"
+            self._entries.pop(key, None)
+            self._negative.pop(key, None)
 
     def snapshot(self) -> list[dict]:
-        """Resumen de agentes cargados — para GET /api/health."""
+        """Resumen de agentes cargados — para GET /api/v1/health."""
         now = self._clock()
         out = []
-        for agent_id, entry in sorted(self._entries.items()):
+        for key, entry in sorted(self._entries.items()):
+            university_code, _, agent_id = key.partition(":")
             rt = entry.runtime
             out.append(
                 {
+                    "university": university_code,
                     "agent_id": agent_id,
                     "agent_name": rt.config.agent_name,
                     "prompt_id": rt.config.prompt_id,
@@ -191,10 +210,13 @@ class AgentRegistry:
 
     # ------------------------------------------------------------ carga sync
 
-    def _load_sync(self, agent_id: str) -> AgentRuntime:
+    def _prefix_for(self, university_code: str) -> str:
+        return self._prefix_template.replace("{university_code}", university_code)
+
+    def _load_sync(self, university_code: str, agent_id: str) -> AgentRuntime:
         """Carga completa de un agente desde storage. Corre en thread."""
         # 1) config.json — sin esto el agente no existe.
-        config_key = f"{self._prefix}/{agent_id}/config.json"
+        config_key = f"{self._prefix_for(university_code)}/{agent_id}/config.json"
         try:
             raw_config = self._storage.get_text(config_key)
         except ObjectNotFoundError:

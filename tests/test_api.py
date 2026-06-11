@@ -18,11 +18,15 @@ TEST_CFG = {
     "service": {
         "host": "127.0.0.1",
         "port": 8000,
-        "university_id": "westfield",
         "cors_origins": ["http://localhost:5173"],
     },
     "worker": {"enabled": False, "interval_seconds": 10},
-    "s3": {"bucket": TEST_BUCKET, "region": "us-east-1", "prefix": "agents"},
+    "s3": {
+        "bucket": TEST_BUCKET,
+        "region": "us-east-1",
+        # Multi-tenant: cada universidad vive bajo su propio prefijo.
+        "prefix": "org={university_code}/agents",
+    },
     "registry": {"ttl_seconds": 300, "negative_ttl_seconds": 30},
     "openai": {
         "api_key": None,  # sin key → los agentes responden fallback (200 igual)
@@ -32,6 +36,7 @@ TEST_CFG = {
     "rate_limit": {"window_seconds": 60, "max_requests": 100},
 }
 
+W_PREFIX = "org=westfield/agents"  # donde viven los fixtures de westfield
 BASE = "/api/v1/universities/westfield"
 PAYLOAD = {"conversation_id": "c1", "user_id": "u1", "message": "hola", "history": []}
 
@@ -43,17 +48,42 @@ def _client(storage: FakeObjectStorage, cfg_overrides: dict | None = None) -> Te
     return TestClient(create_app(storage=storage, config=cfg))
 
 
-def test_universidad_desconocida_404() -> None:
+def test_universidad_con_slug_invalido_404() -> None:
     storage = FakeObjectStorage()
-    build_agent_fixture(storage, "maia")
     client = _client(storage)
 
+    res = client.post("/api/v1/universities/OTRA UNI/agents/maia/chat", json=PAYLOAD)
+    assert res.status_code == 404
+    assert "universidad" in res.json()["error"]
+    assert storage.get_attempts == {}  # slug inválido ni toca el storage
+
+
+def test_universidad_sin_agentes_404() -> None:
+    storage = FakeObjectStorage()
+    build_agent_fixture(storage, "maia", prefix=W_PREFIX)
+    client = _client(storage)
+
+    # maia existe bajo org=westfield/ pero no bajo org=otra-uni/.
     res = client.post("/api/v1/universities/otra-uni/agents/maia/chat", json=PAYLOAD)
     assert res.status_code == 404
-    assert "otra-uni" in res.json()["error"]
 
-    res = client.get("/api/v1/universities/otra-uni/agents/maia/health")
-    assert res.status_code == 404
+
+def test_multitenant_cada_universidad_resuelve_su_prefijo() -> None:
+    storage = FakeObjectStorage()
+    build_agent_fixture(storage, "maia", prefix=W_PREFIX)
+    build_agent_fixture(storage, "tutor", prefix="org=esic/agents")
+    client = _client(storage)
+
+    res_w = client.get(f"{BASE}/agents/maia/health")
+    assert res_w.status_code == 200
+    assert res_w.json()["university"] == "westfield"
+
+    res_e = client.get("/api/v1/universities/esic/agents/tutor/health")
+    assert res_e.status_code == 200
+    assert res_e.json()["university"] == "esic"
+
+    # Aislamiento entre tenants: el agente de esic no existe en westfield.
+    assert client.get(f"{BASE}/agents/tutor/health").status_code == 404
 
 
 def test_chat_agente_inexistente_404() -> None:
@@ -65,7 +95,7 @@ def test_chat_agente_inexistente_404() -> None:
 
 def test_chat_agente_valido_200_fallback_sin_api_key() -> None:
     storage = FakeObjectStorage()
-    build_agent_fixture(storage, "maia")
+    build_agent_fixture(storage, "maia", prefix=W_PREFIX)
     client = _client(storage)
 
     res = client.post(f"{BASE}/agents/maia/chat", json=PAYLOAD)
@@ -79,8 +109,8 @@ def test_chat_agente_valido_200_fallback_sin_api_key() -> None:
 
 def test_aislamiento_agente_roto_503_y_sano_200_en_la_misma_instancia() -> None:
     storage = FakeObjectStorage()
-    build_agent_fixture(storage, "sano")
-    storage.put_text("agents/roto/config.json", "{corrupto")  # config inválida
+    build_agent_fixture(storage, "sano", prefix=W_PREFIX)
+    storage.put_text(f"{W_PREFIX}/roto/config.json", "{corrupto")  # config inválida
     client = _client(storage)
 
     res_roto = client.post(f"{BASE}/agents/roto/chat", json=PAYLOAD)
@@ -93,8 +123,8 @@ def test_aislamiento_agente_roto_503_y_sano_200_en_la_misma_instancia() -> None:
 
 def test_rate_limit_429_por_ip_y_agente() -> None:
     storage = FakeObjectStorage()
-    build_agent_fixture(storage, "maia")
-    build_agent_fixture(storage, "otro")
+    build_agent_fixture(storage, "maia", prefix=W_PREFIX)
+    build_agent_fixture(storage, "otro", prefix=W_PREFIX)
     client = _client(storage, {"rate_limit": {"max_requests": 2}})
 
     assert client.post(f"{BASE}/agents/maia/chat", json=PAYLOAD).status_code == 200
@@ -103,13 +133,13 @@ def test_rate_limit_429_por_ip_y_agente() -> None:
     assert res.status_code == 429
     assert "error" in res.json()
 
-    # La cuota es por IP+agente: otro agente no está agotado.
+    # La cuota es por IP+tenant+agente: otro agente no está agotado.
     assert client.post(f"{BASE}/agents/otro/chat", json=PAYLOAD).status_code == 200
 
 
 def test_health_global_lista_agentes_cargados() -> None:
     storage = FakeObjectStorage()
-    build_agent_fixture(storage, "maia")
+    build_agent_fixture(storage, "maia", prefix=W_PREFIX)
     client = _client(storage)
 
     assert client.get("/api/v1/health").json()["agents"] == []  # lazy: nada cargado aún
@@ -117,14 +147,13 @@ def test_health_global_lista_agentes_cargados() -> None:
 
     body = client.get("/api/v1/health").json()
     assert body["ok"] is True
-    assert body["university"] == "westfield"
     assert body["s3_bucket"] == TEST_BUCKET
-    assert [a["agent_id"] for a in body["agents"]] == ["maia"]
+    assert [(a["university"], a["agent_id"]) for a in body["agents"]] == [("westfield", "maia")]
 
 
 def test_health_por_agente_fuerza_carga() -> None:
     storage = FakeObjectStorage()
-    build_agent_fixture(storage, "maia")
+    build_agent_fixture(storage, "maia", prefix=W_PREFIX)
     client = _client(storage)
 
     res = client.get(f"{BASE}/agents/maia/health")
@@ -139,19 +168,9 @@ def test_health_por_agente_fuerza_carga() -> None:
     assert client.get(f"{BASE}/agents/fantasma/health").status_code == 404
 
 
-def test_university_id_configurable() -> None:
-    storage = FakeObjectStorage()
-    build_agent_fixture(storage, "maia")
-    client = _client(storage, {"service": {"university_id": "esic"}})
-
-    assert client.post(f"{BASE}/agents/maia/chat", json=PAYLOAD).status_code == 404
-    res = client.post("/api/v1/universities/esic/agents/maia/chat", json=PAYLOAD)
-    assert res.status_code == 200
-
-
 def test_payload_invalido_422() -> None:
     storage = FakeObjectStorage()
-    build_agent_fixture(storage, "maia")
+    build_agent_fixture(storage, "maia", prefix=W_PREFIX)
     client = _client(storage)
 
     res = client.post(f"{BASE}/agents/maia/chat", json={"message": "sin ids"})
