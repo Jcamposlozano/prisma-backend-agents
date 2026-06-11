@@ -3,7 +3,7 @@
 #
 # Build:    docker build -t westfield-agent-back-python:latest .
 # Run:      docker run -p 8000:8000 --env-file .env westfield-agent-back-python:latest
-# Health:   curl http://localhost:8000/api/health
+# Health:   curl http://localhost:8000/api/v1/health
 #
 # Env requerido en runtime: S3_BUCKET, AWS_REGION, S3_PREFIX, credenciales
 # AWS (o rol IAM) y OPENAI_API_KEY. Ver .env.example.
@@ -35,7 +35,7 @@ COPY . /app
 RUN poetry install --no-interaction --no-ansi --only main
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-  CMD curl -fsS http://localhost:8000/api/health || exit 1
+  CMD curl -fsS http://localhost:8000/api/v1/health || exit 1
 
 EXPOSE 8000
 

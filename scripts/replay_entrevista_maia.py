@@ -7,14 +7,15 @@ tracking de estado del frontend:
   - is_final_summary         -> fin de la entrevista
   - si no                    -> turns += 1
 
-Guarda el transcript completo en _sim_transcript.json. Temporal — borrar.
+Guarda el transcript completo en _sim_transcript.json.
+Requiere el runtime corriendo en localhost:8000 con credenciales reales.
 """
 
 import json
 
 import httpx
 
-URL = "http://127.0.0.1:8000/api/agents/maia/chat"
+URL = "http://127.0.0.1:8000/api/v1/universities/westfield/agents/maia/chat"
 
 # Respuestas del estudiante, transcritas del PDF (condensadas sin perder
 # la sustancia argumentativa).

@@ -6,12 +6,18 @@ AgentRegistry (carga lazy por agent_id con caché TTL) y el use case
 ChatWithAgent, y los cuelga de `app.state`. Los handlers son delgados —
 extraen el body, hacen rate limit y delegan.
 
-Endpoints:
-  - GET  /api/health                     → estado + agentes cargados
-  - GET  /api/agents/{agent_id}/health   → fuerza la carga de UN agente
-  - POST /api/agents/{agent_id}/chat     → un turno de conversación
+Endpoints (convención del gateway: /api/v1/universities/{university_id}/...):
+  - GET  /api/v1/health                                                → estado + agentes cargados
+  - GET  /api/v1/universities/{university_id}/agents/{agent_id}/health → fuerza la carga de UN agente
+  - POST /api/v1/universities/{university_id}/agents/{agent_id}/chat   → un turno de conversación
+
+El segmento {university_id} se valida contra service.university_id de la
+config (env UNIVERSITY_ID, default "westfield") — otro valor responde 404.
+Es el tenant fijo de esta instancia; multi-tenant real queda como evolución
+sin romper las URLs.
 
 Mapeo de errores (aislado por agente):
+  - universidad desconocida → 404
   - AgentNotFoundError → 404  (no existe config.json para ese agent_id)
   - AgentLoadError     → 503  (config corrupta, prompt ausente, provider desconocido)
   - rate limit         → 429
@@ -92,22 +98,35 @@ def create_app(
 
     # ------------------------------------------------------------- handlers
 
-    @app.get("/api/health")
+    tenant = cfg["service"].get("university_id", "westfield")
+
+    def _check_university(university_id: str) -> None:
+        """El tenant de esta instancia es fijo — otro segmento responde 404."""
+        if university_id != tenant:
+            raise HTTPException(
+                status_code=404,
+                detail=f"universidad '{university_id}' no encontrada",
+            )
+
+    @app.get("/api/v1/health")
     async def health() -> dict:
         """Ping + snapshot de los agentes cargados en esta instancia."""
         return {
             "ok": True,
             "runtime": "python",
+            "university": tenant,
             "s3_bucket": cfg["s3"]["bucket"],
             "agents": registry.snapshot(),
             "timestamp": datetime.now(UTC).isoformat(),
         }
 
-    @app.get("/api/agents/{agent_id}/health")
-    async def agent_health(agent_id: str) -> dict:
+    @app.get("/api/v1/universities/{university_id}/agents/{agent_id}/health")
+    async def agent_health(university_id: str, agent_id: str) -> dict:
         """Fuerza la carga del agente y reporta su estado (404/503 si falla)."""
+        _check_university(university_id)
         runtime = await registry.get(agent_id)  # mapea errores el exception handler
         return {
+            "university": university_id,
             "agent_id": agent_id,
             "ok": True,
             "agent_name": runtime.config.agent_name,
@@ -119,9 +138,15 @@ def create_app(
             "chunks": runtime.chunk_count,
         }
 
-    @app.post("/api/agents/{agent_id}/chat", response_model=ChatResponse)
-    async def chat(agent_id: str, body: ChatRequest, request: Request) -> ChatResponse:
+    @app.post(
+        "/api/v1/universities/{university_id}/agents/{agent_id}/chat",
+        response_model=ChatResponse,
+    )
+    async def chat(
+        university_id: str, agent_id: str, body: ChatRequest, request: Request
+    ) -> ChatResponse:
         """Un turno de conversación con el agente, con rate limit por IP+agente."""
+        _check_university(university_id)
         ip = _extract_ip(request)
         if rate_limiter.hit(f"{ip}:{agent_id}"):
             raise HTTPException(

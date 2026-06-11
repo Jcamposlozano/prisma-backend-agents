@@ -7,9 +7,12 @@ la configuración, el prompt y la base vectorial FAISS de cada agente según el
 ni microservicio nuevo, ni cambios de código — solo publicar archivos en S3
 (ver repo hermano `Westfield_agent_ingest_python`).
 
-- `GET  /api/health` — estado + agentes cargados en la instancia.
-- `GET  /api/agents/{agent_id}/health` — fuerza la carga de un agente y reporta su estado.
-- `POST /api/agents/{agent_id}/chat` — un turno de conversación.
+Rutas según la convención del gateway de la plataforma (`/api/v1/universities/{university_id}/...`;
+el segmento `{university_id}` se valida contra `UNIVERSITY_ID`, default `westfield` — otro valor → 404):
+
+- `GET  /api/v1/health` — estado + agentes cargados en la instancia.
+- `GET  /api/v1/universities/{university_id}/agents/{agent_id}/health` — fuerza la carga de un agente y reporta su estado.
+- `POST /api/v1/universities/{university_id}/agents/{agent_id}/chat` — un turno de conversación.
 
 La **generación de embeddings está desacoplada**: este runtime solo embebe la
 query de cada turno; los documentos los procesa el servicio de ingesta
@@ -189,7 +192,7 @@ Al cargar valida `index.ntotal == len(chunks)` y `index.d == embedding_dimension
 ### Endpoint conversacional
 
 ```
-POST /api/agents/{agent_id}/chat
+POST /api/v1/universities/{university_id}/agents/{agent_id}/chat
 ```
 
 Request:
@@ -227,6 +230,7 @@ Response 200:
 
 | Situación | Respuesta |
 |---|---|
+| `university_id` distinto al configurado | `404 {"error": "..."}` |
 | `agent_id` inexistente | `404 {"error": "..."}` |
 | agente roto (config corrupta, prompt ausente, provider desconocido) | `503 {"error": "..."}` |
 | rate limit (por IP+agente) | `429 {"error": "..."}` |
@@ -254,6 +258,7 @@ El fallo de un agente **jamás** afecta a otros agentes de la misma instancia.
 
 | Var | Default | Notas |
 |---|---|---|
+| `UNIVERSITY_ID` | `westfield` | Tenant de las rutas `/api/v1/universities/<id>/...`. |
 | `S3_BUCKET` | `westfield-agent-knowledge` | Bucket de conocimiento. |
 | `AWS_REGION` | `us-east-1` | Región del bucket. |
 | `S3_PREFIX` | `agents` | Prefijo raíz de los agentes. |
