@@ -83,7 +83,7 @@ def load_config(config_dir: str = "configs") -> dict[str, Any]:
     # ---- service ----
     cfg["service"]["host"] = os.getenv("HOST", cfg["service"].get("host", "0.0.0.0"))
     cfg["service"]["port"] = int(os.getenv("PORT", cfg["service"].get("port", 8000)))
-    cfg["service"].setdefault("cors_origins", ["http://localhost:5173"])
+    cfg["service"].setdefault("cors_origins", ["*"])
 
     # ---- worker ----
     cfg["worker"]["enabled"] = _env_bool(

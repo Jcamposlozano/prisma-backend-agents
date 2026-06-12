@@ -6,11 +6,9 @@ project:
 service:
   host: 0.0.0.0
   port: 8000
-  # Orígenes permitidos por CORS. El front del proyecto Node corre en
-  # localhost:5173 en dev. Agregar acá el dominio de producción cuando se
-  # despliegue (Railway, etc.).
+  # Orígenes permitidos por CORS. "*" permite cualquier origen.
   cors_origins:
-    - http://localhost:5173
+    - "*"
 
 worker:
   enabled: true
