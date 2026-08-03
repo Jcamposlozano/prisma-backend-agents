@@ -31,6 +31,7 @@ from pydantic import ValidationError
 from westfield_agent_back_python.adapters.faiss_retriever import FaissRetriever
 from westfield_agent_back_python.adapters.llm_factory import (
     ProviderSettings,
+    agent_env_suffix,
     build_chat_client,
     build_embeddings,
 )
@@ -68,6 +69,7 @@ class AgentRuntime:
     degraded: bool = False  # True si el vector store falló (responde sin RAG)
     chunk_count: int = 0
     loaded_at: float = 0.0  # epoch (para health/snapshot)
+    dedicated_api_key: bool = False  # True si usa su propia key (gasto separado)
 
 
 @dataclass
@@ -184,6 +186,44 @@ class AgentRegistry:
             self._entries.pop(key, None)
             self._negative.pop(key, None)
 
+    async def list_agents(self, university_code: str) -> list[dict]:
+        """
+        Descubre los agentes publicados de una universidad (discovery para el
+        front). Lista los `…/agents/<id>/config.json` bajo el prefijo del tenant
+        y devuelve metadata mínima de cada uno.
+
+        raises UniversityNotFoundError si el slug es inválido.
+        return lista (posiblemente vacía) de {agent_id, agent_name, has_rag}.
+        """
+        if not _SLUG_RE.match(university_code or ""):
+            raise UniversityNotFoundError(university_code)
+        return await asyncio.to_thread(self._list_agents_sync, university_code)
+
+    def _list_agents_sync(self, university_code: str) -> list[dict]:
+        prefix = self._prefix_for(university_code).rstrip("/") + "/"
+        out: list[dict] = []
+        for key in sorted(self._storage.list_keys(prefix)):
+            # Solo nos interesan los config.json directos: <prefix>/<id>/config.json
+            rest = key[len(prefix) :]
+            parts = rest.split("/")
+            if len(parts) != 2 or parts[1] != "config.json":
+                continue
+            agent_id = parts[0]
+            try:
+                config = AgentConfig.model_validate_json(self._storage.get_text(key))
+            except Exception as err:
+                # Un agente con config corrupta no debe romper el listado completo.
+                log.warning(f"🟡 list_agents: '{agent_id}' tiene config inválida ({err}) — omitido.")
+                continue
+            out.append(
+                {
+                    "agent_id": config.agent_id,
+                    "agent_name": config.agent_name,
+                    "has_rag": config.vector_store_id is not None,
+                }
+            )
+        return out
+
     def snapshot(self) -> list[dict]:
         """Resumen de agentes cargados — para GET /api/v1/health."""
         now = self._clock()
@@ -201,6 +241,8 @@ class AgentRegistry:
                     "llm_provider": rt.config.llm_provider,
                     "llm_model": rt.config.llm_model,
                     "degraded": rt.degraded,
+                    # Origen de la credencial, NUNCA la credencial.
+                    "api_key": "dedicada" if rt.dedicated_api_key else "global",
                     "chunks": rt.chunk_count,
                     "loaded_at": rt.loaded_at,
                     "ttl_remaining": max(0, round(entry.expires_at - now)),
@@ -238,11 +280,21 @@ class AgentRegistry:
 
         # 3) chat client del provider configurado (vía fábrica).
         #    Provider desconocido → AgentLoadError; sin API key → None (fallback).
-        chat_client = build_chat_client(config, self._settings)
+        #    La key se resuelve por agente: la dedicada (OPENAI_API_KEY_<AGENT_ID>)
+        #    si existe, si no la global. Así el gasto queda atribuido por agente.
+        settings = self._settings.for_agent(config.agent_id)
+        dedicated_api_key = self._settings.has_agent_key(config.agent_id)
+        chat_client = build_chat_client(config, settings)
         if chat_client is None:
             log.warning(
                 f"🟡 Agente '{agent_id}': sin API key de '{config.llm_provider}' "
                 f"— responderá su fallback_message."
+            )
+        elif not dedicated_api_key:
+            log.warning(
+                f"🟡 Agente '{agent_id}': sin key dedicada — usa la global, su "
+                f"gasto no queda separado. Definí "
+                f"OPENAI_API_KEY_{agent_env_suffix(config.agent_id)} para aislarlo."
             )
 
         # 4) vector store — best-effort: si falla, el agente queda degradado
@@ -256,10 +308,12 @@ class AgentRegistry:
                 store = load_vector_store(self._storage, config.vector_store_s3_uri)
                 always_include = store.always_include
                 chunk_count = len(store.chunks)
+                # Mismo `settings` scopeado que el chat client: la query de RAG
+                # también se factura contra la key del agente.
                 embeddings = build_embeddings(
                     store.manifest.embedding_provider,
                     store.manifest.embedding_model or self._embedding_model_fallback,
-                    self._settings,
+                    settings,
                 )
                 if embeddings is not None:
                     retriever = FaissRetriever(
@@ -285,7 +339,8 @@ class AgentRegistry:
         log.info(
             f"🧠 Agente '{agent_id}' cargado: prompt={config.prompt_id} · "
             f"vector_store={config.vector_store_id or 'sin RAG'} · "
-            f"{chunk_count} chunks · {config.llm_provider}/{config.llm_model}"
+            f"{chunk_count} chunks · {config.llm_provider}/{config.llm_model} · "
+            f"key={'dedicada' if dedicated_api_key else 'global'}"
             f"{' · DEGRADADO' if degraded else ''}"
         )
         return AgentRuntime(
@@ -297,4 +352,5 @@ class AgentRegistry:
             degraded=degraded,
             chunk_count=chunk_count,
             loaded_at=time.time(),
+            dedicated_api_key=dedicated_api_key,
         )

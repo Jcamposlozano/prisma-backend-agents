@@ -67,10 +67,20 @@ def create_app(
     if storage is None:
         storage = S3ObjectStorage(bucket=cfg["s3"]["bucket"], region=cfg["s3"]["region"])
 
+    # Keys dedicadas por agente (OPENAI_API_KEY_<AGENT_ID>) → gasto separado.
+    # `.get()` con default: un config inyectado en tests no tiene por qué traerlas.
+    agent_api_keys = cfg["openai"].get("agent_api_keys", {})
     provider_settings = ProviderSettings(
         api_keys={"openai": cfg["openai"].get("api_key")},
         base_urls={"openai": cfg["openai"].get("base_url", "https://api.openai.com/v1")},
+        agent_api_keys={"openai": agent_api_keys},
     )
+    if agent_api_keys:
+        # Solo los NOMBRES de agente — jamás la key ni un fragmento de ella.
+        log.info(
+            f"🔑 Keys dedicadas por agente ({len(agent_api_keys)}): "
+            f"{', '.join(sorted(a.lower() for a in agent_api_keys))}"
+        )
     if not cfg["openai"].get("api_key"):
         log.warning("🟡 Sin OPENAI_API_KEY → los agentes openai responderán su fallback_message.")
 
@@ -118,6 +128,12 @@ def create_app(
         tags=["Agents"],
     )
 
+    @router.get("")
+    async def list_agents(university_code: str) -> dict:
+        """Lista los agentes publicados de la universidad (discovery para el front)."""
+        agents = await registry.list_agents(university_code)
+        return {"university": university_code, "agents": agents}
+
     @router.get("/{agent_id}/health")
     async def agent_health(university_code: str, agent_id: str) -> dict:
         """Fuerza la carga del agente y reporta su estado (404/503 si falla)."""
@@ -130,6 +146,9 @@ def create_app(
             "degraded": runtime.degraded,
             "llm_provider": runtime.config.llm_provider,
             "llm_model": runtime.config.llm_model,
+            # Origen de la credencial ("dedicada" = key propia del agente, el
+            # gasto queda separado). NUNCA se expone la key en sí.
+            "api_key": "dedicada" if runtime.dedicated_api_key else "global",
             "prompt_id": runtime.config.prompt_id,
             "vector_store_id": runtime.config.vector_store_id,
             "chunks": runtime.chunk_count,

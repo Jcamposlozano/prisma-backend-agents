@@ -17,12 +17,16 @@ Semántica de errores:
   - provider desconocido → AgentLoadError (solo ese agente queda 503).
   - provider conocido pero sin API key → None (el agente arranca en
     fallback / sin RAG — modo degradado controlado, no error).
+
+Keys por agente: cada agente puede tener la suya (OPENAI_API_KEY_<AGENT_ID>)
+para separar el gasto. La resolución la hace ProviderSettings.for_agent() en
+cold-load; los builders solo ven `settings.api_key(provider)` ya resuelto.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from westfield_agent_back_python.adapters.openai_chat_client import OpenAIChatClient
 from westfield_agent_back_python.adapters.openai_embeddings import OpenAIEmbeddings
@@ -32,18 +36,60 @@ from westfield_agent_back_python.ports.chat_client import ChatClient
 from westfield_agent_back_python.ports.embeddings import Embeddings
 
 
+def agent_env_suffix(agent_id: str) -> str:
+    """
+    agent_id → sufijo de env var (`student-services` → `STUDENT_SERVICES`).
+
+    Los nombres de env var no admiten guiones, así que `-` y `_` colapsan al
+    mismo sufijo. Con la convención de slugs actual no hay colisión posible.
+    """
+    return agent_id.strip().upper().replace("-", "_")
+
+
 @dataclass(frozen=True)
 class ProviderSettings:
-    """Credenciales/base_urls por proveedor — vienen de config/env, nunca de S3."""
+    """
+    Credenciales/base_urls por proveedor — vienen de config/env, nunca de S3.
+
+    `agent_api_keys` mapea proveedor → {SUFIJO_DEL_AGENTE: key dedicada}: una
+    key propia por agente (OPENAI_API_KEY_MAIA) para poder atribuir el gasto
+    agente por agente. El registry llama a `for_agent()` en cold-load y recibe
+    un ProviderSettings ya resuelto — por eso los builders de la fábrica no
+    cambian de firma ni se enteran de que existen keys por agente.
+    """
 
     api_keys: dict[str, str | None] = field(default_factory=dict)
     base_urls: dict[str, str] = field(default_factory=dict)
+    agent_api_keys: dict[str, dict[str, str]] = field(default_factory=dict)
 
     def api_key(self, provider: str) -> str | None:
         return self.api_keys.get(provider)
 
     def base_url(self, provider: str, default: str = "") -> str:
         return self.base_urls.get(provider, default)
+
+    def has_agent_key(self, agent_id: str, provider: str | None = None) -> bool:
+        """True si el agente tiene key dedicada (en algún proveedor, o en uno dado)."""
+        suffix = agent_env_suffix(agent_id)
+        providers = [provider] if provider else list(self.agent_api_keys)
+        return any(self.agent_api_keys.get(p, {}).get(suffix) for p in providers)
+
+    def for_agent(self, agent_id: str) -> ProviderSettings:
+        """
+        Copia con las keys YA resueltas para este agente: la dedicada si
+        existe, si no la global.
+
+        Asigna (no actualiza) la entrada del proveedor, así un agente con key
+        propia funciona aunque no haya key global para ese proveedor.
+        """
+        if not self.agent_api_keys:
+            return self
+        suffix = agent_env_suffix(agent_id)
+        resolved = dict(self.api_keys)
+        for provider, per_agent in self.agent_api_keys.items():
+            if key := per_agent.get(suffix):
+                resolved[provider] = key
+        return replace(self, api_keys=resolved)
 
 
 ChatClientBuilder = Callable[[AgentConfig, ProviderSettings], ChatClient | None]

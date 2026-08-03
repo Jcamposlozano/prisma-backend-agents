@@ -45,6 +45,24 @@ def _env_bool(key: str, default: bool) -> bool:
     return v.strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
+def _collect_prefixed_env(prefix: str) -> dict[str, str]:
+    """
+    Recolecta las env vars `<prefix><SUFIJO>` en {SUFIJO: valor}.
+
+    Ignora la var exacta sin sufijo, los sufijos vacíos y los valores vacíos.
+    No interpreta el sufijo: quien lo resuelve contra un agent_id es
+    adapters/llm_factory.py — esta capa no conoce agentes.
+    """
+    out: dict[str, str] = {}
+    for name, value in os.environ.items():
+        if not name.startswith(prefix):
+            continue
+        suffix = name[len(prefix) :].strip().upper()
+        if suffix and value.strip():
+            out[suffix] = value.strip()
+    return out
+
+
 def load_config(config_dir: str = "configs") -> dict[str, Any]:
     """
     Lee base.yaml + <ENV>.yaml (si existe) y aplica overrides por env vars.
@@ -125,6 +143,11 @@ def load_config(config_dir: str = "configs") -> dict[str, Any]:
         "OPENAI_EMBEDDING_MODEL_FALLBACK",
         openai_cfg.get("embedding_model_fallback", "text-embedding-3-small"),
     )
+    # Keys dedicadas por agente: OPENAI_API_KEY_<AGENT_ID>. Una key = un
+    # proyecto de OpenAI = una línea separada en la factura, que es lo que
+    # permite atribuir el gasto agente por agente. Un agente sin key propia
+    # cae a la global (con warning al cargarse).
+    openai_cfg["agent_api_keys"] = _collect_prefixed_env("OPENAI_API_KEY_")
 
     # ---- rate_limit ----
     cfg["rate_limit"]["window_seconds"] = int(

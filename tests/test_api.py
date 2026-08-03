@@ -48,6 +48,36 @@ def _client(storage: FakeObjectStorage, cfg_overrides: dict | None = None) -> Te
     return TestClient(create_app(storage=storage, config=cfg))
 
 
+def test_list_agents_devuelve_los_publicados() -> None:
+    storage = FakeObjectStorage()
+    build_agent_fixture(storage, "maia", prefix=W_PREFIX, vectors=[[1.0, 0.0], [0.0, 1.0]])
+    build_agent_fixture(storage, "student_services", prefix=W_PREFIX)
+    client = _client(storage)
+
+    res = client.get(f"{BASE}/agents")
+    assert res.status_code == 200
+    body = res.json()
+    assert body["university"] == "westfield"
+    ids = {a["agent_id"] for a in body["agents"]}
+    assert ids == {"maia", "student_services"}
+    maia = next(a for a in body["agents"] if a["agent_id"] == "maia")
+    assert maia["has_rag"] is True
+    assert "agent_name" in maia
+
+
+def test_list_agents_slug_invalido_404() -> None:
+    client = _client(FakeObjectStorage())
+    res = client.get("/api/v1/universities/MAL%20SLUG/agents")
+    assert res.status_code == 404
+
+
+def test_list_agents_universidad_sin_agentes_lista_vacia() -> None:
+    client = _client(FakeObjectStorage())
+    res = client.get(f"{BASE}/agents")
+    assert res.status_code == 200
+    assert res.json()["agents"] == []
+
+
 def test_universidad_con_slug_invalido_404() -> None:
     storage = FakeObjectStorage()
     client = _client(storage)
@@ -166,6 +196,25 @@ def test_health_por_agente_fuerza_carga() -> None:
     assert body["vector_store_id"] is None  # fixture sin RAG
 
     assert client.get(f"{BASE}/agents/fantasma/health").status_code == 404
+
+
+def test_health_por_agente_reporta_origen_de_la_key_sin_exponerla() -> None:
+    storage = FakeObjectStorage()
+    build_agent_fixture(storage, "maia", prefix=W_PREFIX)
+    build_agent_fixture(storage, "westy", prefix=W_PREFIX)
+    client = _client(
+        storage,
+        {"openai": {"api_key": "sk-global", "agent_api_keys": {"MAIA": "sk-maia"}}},
+    )
+
+    maia = client.get(f"{BASE}/agents/maia/health").json()
+    westy = client.get(f"{BASE}/agents/westy/health").json()
+    assert maia["api_key"] == "dedicada"
+    assert westy["api_key"] == "global"
+
+    # El endpoint reporta el ORIGEN, nunca la credencial.
+    assert "sk-maia" not in maia and "sk-maia" not in str(maia)
+    assert "sk-global" not in str(westy)
 
 
 def test_payload_invalido_422() -> None:

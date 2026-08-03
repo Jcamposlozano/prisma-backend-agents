@@ -1,0 +1,41 @@
+{
+  "agent_id": "maia",
+  "agent_name": "Maia",
+  "prompt_id": "system-v9",
+  "prompt_s3_uri": "s3://prisma-agents-knowledge/org=westfield/agents/maia/prompts/system.md",
+  "vector_store_id": "v2",
+  "vector_store_s3_uri": "s3://prisma-agents-knowledge/org=westfield/agents/maia/vector_store/v2/",
+  "llm_provider": "openai",
+  "llm_model": "gpt-4o",
+  "temperature": 0.4,
+  "max_tokens": 800,
+  "top_k": 4,
+  "min_similarity": 0.2,
+  "response_format": "json",
+  "fallback_message": "Estoy teniendo un problema técnico en este momento. Retomemos tu argumento en unos minutos.",
+  "leak_markers": [
+    "Notas del instructor",
+    "notas del profesor",
+    "Vías de Respuesta",
+    "Reflexiones que Puede Suscitar"
+  ],
+  "leak_replacement_message": "No puedo compartir el material interno del instructor. Volvamos a tu argumento: ¿qué evidencia concreta del caso lo sostiene?",
+  "metadata": {
+    "migrated_from": "maia-index.json",
+    "case": "etsy"
+  },
+  "hard_rules": [
+    {
+      "when": {
+        "structured.current_question": {
+          "gte": 4
+        }
+      },
+      "set": {
+        "is_final_summary": true,
+        "advance_to_next_question": false,
+        "current_question": 3
+      }
+    }
+  ]
+}

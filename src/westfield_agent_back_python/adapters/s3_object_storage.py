@@ -59,3 +59,10 @@ class S3ObjectStorage:
 
     def get_text(self, key: str) -> str:
         return self.get_bytes(key).decode("utf-8")
+
+    def list_keys(self, prefix: str) -> list[str]:
+        keys: list[str] = []
+        paginator = self._client.get_paginator("list_objects_v2")
+        for page in paginator.paginate(Bucket=self._bucket, Prefix=prefix):
+            keys.extend(item["Key"] for item in page.get("Contents", []))
+        return keys

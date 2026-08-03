@@ -79,6 +79,10 @@ Para agregar un proveedor (Anthropic, Azure, Bedrock, ...):
 2. Registrarlo en `CHAT_PROVIDERS` / `EMBEDDING_PROVIDERS` (1 línea).
 3. Exponer su API key en `ProviderSettings` (composition root en `api.py`).
 
+La resolución de la key por agente es transparente para el builder: el registry llama a
+`ProviderSettings.for_agent(agent_id)` en cold-load y le pasa un settings ya resuelto, así que
+el builder solo hace `settings.api_key("mi-provider")` como siempre.
+
 El use case, el registry y los handlers no cambian. Un agente con provider
 desconocido devuelve 503 **solo para ese agente** — los demás siguen operando.
 
@@ -265,7 +269,8 @@ El fallo de un agente **jamás** afecta a otros agentes de la misma instancia.
 | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | — | Cadena estándar de boto3 (o perfil/rol IAM). |
 | `REGISTRY_TTL_SECONDS` | `300` (`30` en dev) | TTL del caché de agentes. |
 | `REGISTRY_NEGATIVE_TTL_SECONDS` | `30` | Caché negativa de agent_ids inexistentes. |
-| `OPENAI_API_KEY` | (sin default) | Sin esto, agentes openai responden fallback. |
+| `OPENAI_API_KEY` | (sin default) | Key global. Sin esto, agentes openai responden fallback. |
+| `OPENAI_API_KEY_<AGENT_ID>` | (sin default) | Key dedicada de un agente (ver abajo). Si falta, usa la global. |
 | `OPENAI_BASE_URL` | `https://api.openai.com/v1` | Azure / proxies. |
 | `OPENAI_EMBEDDING_MODEL_FALLBACK` | `text-embedding-3-small` | Solo si el manifest no declara modelo. |
 | `ENV` | `dev` | `dev` o `prod` → carga `configs/<env>.yaml`. |
@@ -273,6 +278,31 @@ El fallo de un agente **jamás** afecta a otros agentes de la misma instancia.
 | `HOST` / `PORT` | `0.0.0.0` / `8000` | Bind del FastAPI. |
 | `WORKER_ENABLED` / `WORKER_INTERVAL_SECONDS` | `true` / `10` | Worker stub. |
 | `RATE_LIMIT_WINDOW` / `RATE_LIMIT_MAX` | `60` / `12` | Rate limit por IP+agente. |
+
+### Key dedicada por agente (control de gastos)
+
+Cada agente puede usar **su propia API key**, para que el gasto quede atribuido agente por
+agente. La convención es `OPENAI_API_KEY_<AGENT_ID>` en mayúsculas, con los guiones convertidos
+a guión bajo:
+
+```bash
+OPENAI_API_KEY=sk-global               # la de siempre: sigue siendo el fallback
+OPENAI_API_KEY_MAIA=sk-proj-...        # agente maia
+OPENAI_API_KEY_STUDENT_SERVICES=sk-... # agente student_services
+```
+
+En OpenAI, cada key pertenece a un proyecto y el uso se reporta por proyecto: creando un
+proyecto por agente, **platform.openai.com → Usage** separa el gasto solo, sin telemetría
+propia. La key cubre tanto el chat como el embedding de la query de RAG de ese agente.
+
+- Las keys **no** van en `config.json` (viajaría a S3 y a la imagen). Solo env vars.
+- Un agente sin key propia usa `OPENAI_API_KEY` y avisa con un `🟡` al cargarse.
+- Un agente con key propia funciona **aunque no exista** `OPENAI_API_KEY`.
+- Al arrancar, el log `🔑` lista qué agentes tienen key dedicada (solo nombres, nunca la key).
+- Para verificar sin exponer nada:
+  `GET /api/v1/universities/<u>/agents/<agent_id>/health` devuelve `"api_key": "dedicada" | "global"`.
+- Agregar o rotar una key requiere actualizar el entorno y reiniciar el servicio (a diferencia
+  de los prompts y vector stores, que se toman de S3 sin redeploy).
 
 ---
 
