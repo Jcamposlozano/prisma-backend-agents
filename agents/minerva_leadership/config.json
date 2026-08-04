@@ -1,0 +1,31 @@
+{
+  "agent_id": "minerva_leadership",
+  "agent_name": "Minerva – Leadership",
+  "prompt_id": "system-v1",
+  "prompt_s3_uri": "s3://prisma-agents-knowledge/org=westfield/agents/minerva_leadership/prompts/system.md",
+  "vector_store_id": "v1",
+  "vector_store_s3_uri": "s3://prisma-agents-knowledge/org=westfield/agents/minerva_leadership/vector_store/v1/",
+  "llm_provider": "openai",
+  "llm_model": "gpt-4o",
+  "temperature": 0.1,
+  "max_tokens": 800,
+  "top_k": 5,
+  "min_similarity": 0.2,
+  "response_format": "text",
+  "fallback_message": "Estoy teniendo un problema técnico en este momento. Retomemos tu consulta de liderazgo en unos minutos.",
+  "leak_markers": [
+    "notas del instructor",
+    "notas del profesor",
+    "nota del caso",
+    "guía didáctica",
+    "introspección personal",
+    "solución del caso"
+  ],
+  "leak_replacement_message": "No puedo compartir el material interno ni resolver el ejercicio por vos. Pensémoslo juntos: ¿qué concepto o dato del caso te está costando aplicar?",
+  "hard_rules": [],
+  "metadata": {
+    "area": "liderazgo",
+    "programa": "MBA",
+    "institucion": "Westfield"
+  }
+}

@@ -63,6 +63,9 @@ class FakeObjectStorage:
     def get_text(self, key: str) -> str:
         return self.get_bytes(key).decode("utf-8")
 
+    def list_keys(self, prefix: str) -> list[str]:
+        return sorted(k for k in self._objects if k.startswith(prefix))
+
 
 class FakeChatClient:
     """ChatClient fake — devuelve `reply` o tira `error`. Registra los calls."""
@@ -190,14 +193,19 @@ def make_registry(
     *,
     prefix: str = "agents",
     api_keys: dict[str, str | None] | None = None,
+    agent_api_keys: dict[str, dict[str, str]] | None = None,
     ttl: int = 300,
     negative_ttl: int = 30,
     clock: Callable[[], float] | None = None,
 ) -> AgentRegistry:
+    """`agent_api_keys`: proveedor → {SUFIJO_DEL_AGENTE: key dedicada}."""
     return AgentRegistry(
         storage=storage,
         prefix=prefix,
-        provider_settings=ProviderSettings(api_keys=api_keys or {}),
+        provider_settings=ProviderSettings(
+            api_keys=api_keys or {},
+            agent_api_keys=agent_api_keys or {},
+        ),
         embedding_model_fallback="text-embedding-3-small",
         ttl_seconds=ttl,
         negative_ttl_seconds=negative_ttl,

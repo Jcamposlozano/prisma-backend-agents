@@ -127,6 +127,90 @@ async def test_sin_api_key_chat_client_none_pero_carga() -> None:
     assert rt.chat_client is None
 
 
+# ----------------------------------- keys dedicadas por agente (gasto separado)
+
+
+async def test_agente_usa_su_key_dedicada() -> None:
+    storage = FakeObjectStorage()
+    build_agent_fixture(storage, "maia", vectors=VECTORS)
+    registry = make_registry(
+        storage,
+        api_keys={"openai": "sk-global"},
+        agent_api_keys={"openai": {"MAIA": "sk-maia"}},
+    )
+
+    rt = await registry.get(U, "maia")
+    assert rt.dedicated_api_key is True
+    assert rt.chat_client._api_key == "sk-maia"
+    # La query de RAG también se factura contra la key del agente.
+    assert rt.retriever._embeddings._api_key == "sk-maia"
+
+
+async def test_agente_sin_key_dedicada_usa_la_global() -> None:
+    storage = FakeObjectStorage()
+    build_agent_fixture(storage, "westy")
+    registry = make_registry(
+        storage,
+        api_keys={"openai": "sk-global"},
+        agent_api_keys={"openai": {"MAIA": "sk-maia"}},
+    )
+
+    rt = await registry.get(U, "westy")
+    assert rt.dedicated_api_key is False
+    assert rt.chat_client._api_key == "sk-global"
+
+
+async def test_aislamiento_de_keys_entre_agentes_de_la_misma_instancia() -> None:
+    """Cada agente factura contra SU key — es el objetivo de todo el cambio."""
+    storage = FakeObjectStorage()
+    build_agent_fixture(storage, "maia")
+    build_agent_fixture(storage, "westy")
+    build_agent_fixture(storage, "student_services")
+    registry = make_registry(
+        storage,
+        api_keys={"openai": "sk-global"},
+        agent_api_keys={"openai": {"MAIA": "sk-maia", "STUDENT_SERVICES": "sk-ss"}},
+    )
+
+    maia = await registry.get(U, "maia")
+    westy = await registry.get(U, "westy")
+    services = await registry.get(U, "student_services")
+
+    assert maia.chat_client._api_key == "sk-maia"
+    assert services.chat_client._api_key == "sk-ss"
+    assert westy.chat_client._api_key == "sk-global"  # sin dedicada → global
+    assert len({maia.chat_client._api_key, services.chat_client._api_key}) == 2
+
+
+async def test_agente_con_key_dedicada_responde_sin_key_global() -> None:
+    """Sin OPENAI_API_KEY, el que tiene la suya funciona y el resto va a fallback."""
+    storage = FakeObjectStorage()
+    build_agent_fixture(storage, "maia")
+    build_agent_fixture(storage, "westy")
+    registry = make_registry(storage, agent_api_keys={"openai": {"MAIA": "sk-maia"}})
+
+    assert (await registry.get(U, "maia")).chat_client._api_key == "sk-maia"
+    assert (await registry.get(U, "westy")).chat_client is None
+
+
+async def test_snapshot_reporta_origen_de_la_key_sin_exponerla() -> None:
+    storage = FakeObjectStorage()
+    build_agent_fixture(storage, "maia")
+    build_agent_fixture(storage, "westy")
+    registry = make_registry(
+        storage,
+        api_keys={"openai": "sk-global"},
+        agent_api_keys={"openai": {"MAIA": "sk-maia"}},
+    )
+    await registry.get(U, "maia")
+    await registry.get(U, "westy")
+
+    por_agente = {e["agent_id"]: e for e in registry.snapshot()}
+    assert por_agente["maia"]["api_key"] == "dedicada"
+    assert por_agente["westy"]["api_key"] == "global"
+    assert "sk-maia" not in str(registry.snapshot())
+
+
 async def test_ttl_expirado_recarga() -> None:
     storage = FakeObjectStorage()
     build_agent_fixture(storage, "maia")
@@ -193,6 +277,43 @@ async def test_invalidate_fuerza_recarga() -> None:
     registry.invalidate(U, "maia")
     await registry.get(U, "maia")
     assert storage.get_attempts[CONFIG_KEY] == 2
+
+
+async def test_list_agents_descubre_los_publicados() -> None:
+    storage = FakeObjectStorage()
+    build_agent_fixture(storage, "maia", vectors=VECTORS)  # con RAG
+    build_agent_fixture(storage, "demo")  # sin RAG
+    registry = make_registry(storage)
+
+    agents = await registry.list_agents(U)
+    ids = {a["agent_id"] for a in agents}
+    assert ids == {"maia", "demo"}
+    maia = next(a for a in agents if a["agent_id"] == "maia")
+    demo = next(a for a in agents if a["agent_id"] == "demo")
+    assert maia["has_rag"] is True
+    assert demo["has_rag"] is False
+    assert maia["agent_name"]  # nombre presente
+
+
+async def test_list_agents_sin_agentes_lista_vacia() -> None:
+    registry = make_registry(FakeObjectStorage())
+    assert await registry.list_agents(U) == []
+
+
+async def test_list_agents_slug_invalido_es_error() -> None:
+    registry = make_registry(FakeObjectStorage())
+    with pytest.raises(UniversityNotFoundError):
+        await registry.list_agents("MAYUS")
+
+
+async def test_list_agents_omite_config_corrupta() -> None:
+    storage = FakeObjectStorage()
+    build_agent_fixture(storage, "sano")
+    storage.put_text("agents/roto/config.json", "{corrupto")
+    registry = make_registry(storage)
+
+    agents = await registry.list_agents(U)
+    assert [a["agent_id"] for a in agents] == ["sano"]  # el roto se omite, no rompe
 
 
 async def test_snapshot_lista_agentes_cargados() -> None:

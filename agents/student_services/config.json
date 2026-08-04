@@ -1,0 +1,23 @@
+{
+  "agent_id": "student_services",
+  "agent_name": "Student Services",
+  "prompt_id": "system-v1",
+  "prompt_s3_uri": "s3://prisma-agents-knowledge/org=esic/agents/student_services/prompts/system.md",
+  "vector_store_id": "v1",
+  "vector_store_s3_uri": "s3://prisma-agents-knowledge/org=esic/agents/student_services/vector_store/v1/",
+  "llm_provider": "openai",
+  "llm_model": "gpt-4o-mini",
+  "temperature": 0.3,
+  "max_tokens": 800,
+  "top_k": 5,
+  "min_similarity": 0.2,
+  "response_format": "text",
+  "fallback_message": "Estoy teniendo un problema técnico en este momento. Volvé a intentarlo en unos minutos o escribí a un asesor académico.",
+  "leak_markers": [],
+  "leak_replacement_message": null,
+  "hard_rules": [],
+  "metadata": {
+    "area": "admisiones",
+    "institucion": "ESIC"
+  }
+}

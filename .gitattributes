@@ -1,0 +1,7 @@
+# Fin de línea normalizado a LF en todo el repo.
+#
+# Sin esto, un editor o la sincronización de OneDrive convierte archivos a CRLF
+# y git los reporta como modificados enteros: el commit 7e479da trajo 4.512
+# líneas de ruido (73 archivos tocados, pero solo 34 con cambios reales).
+# `text=auto` detecta los binarios solo y no los toca.
+* text=auto eol=lf

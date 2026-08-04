@@ -28,3 +28,12 @@ class ObjectStorage(Protocol):
     def get_text(self, key: str) -> str:
         """Como get_bytes pero decodificado UTF-8."""
         ...
+
+    def list_keys(self, prefix: str) -> list[str]:
+        """
+        prefix: prefijo de keys, ej. "agents/" o "org=westfield/agents/".
+        return: lista de keys completas bajo ese prefijo (puede estar vacía).
+                Usado para descubrir agentes (discovery), no en el camino
+                caliente; el registry lo envuelve en asyncio.to_thread.
+        """
+        ...

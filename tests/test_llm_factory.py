@@ -13,6 +13,7 @@ from tests.fakes import (
 )
 from westfield_agent_back_python.adapters.llm_factory import (
     ProviderSettings,
+    agent_env_suffix,
     build_chat_client,
     build_embeddings,
 )
@@ -69,6 +70,71 @@ def test_build_embeddings_conocido_y_desconocido() -> None:
 
     with pytest.raises(ValueError, match="inexistente"):
         build_embeddings("inexistente", "x", settings)
+
+
+# ------------------------------------------- keys dedicadas por agente
+
+
+def test_agent_env_suffix_normaliza_guiones_y_mayusculas() -> None:
+    assert agent_env_suffix("maia") == "MAIA"
+    assert agent_env_suffix("minerva_leadership") == "MINERVA_LEADERSHIP"
+    # Los nombres de env var no admiten guiones: `-` y `_` colapsan al mismo sufijo.
+    assert agent_env_suffix("student-services") == agent_env_suffix("student_services")
+
+
+def test_for_agent_prefiere_la_key_dedicada() -> None:
+    settings = ProviderSettings(
+        api_keys={"openai": "sk-global"},
+        agent_api_keys={"openai": {"MAIA": "sk-maia"}},
+    )
+
+    client = build_chat_client(_config(agent_id="maia"), settings.for_agent("maia"))
+    assert client._api_key == "sk-maia"
+
+
+def test_for_agent_cae_a_la_key_global_si_no_hay_dedicada() -> None:
+    settings = ProviderSettings(
+        api_keys={"openai": "sk-global"},
+        agent_api_keys={"openai": {"MAIA": "sk-maia"}},
+    )
+
+    client = build_chat_client(_config(agent_id="westy"), settings.for_agent("westy"))
+    assert client._api_key == "sk-global"
+
+
+def test_for_agent_funciona_sin_key_global() -> None:
+    """Un agente con key propia responde aunque no exista OPENAI_API_KEY."""
+    settings = ProviderSettings(agent_api_keys={"openai": {"MAIA": "sk-maia"}})
+
+    assert build_chat_client(_config(agent_id="maia"), settings.for_agent("maia"))._api_key == (
+        "sk-maia"
+    )
+    # ...y el que no la tiene sigue sin cliente → fallback controlado.
+    assert build_chat_client(_config(agent_id="westy"), settings.for_agent("westy")) is None
+
+
+def test_for_agent_tambien_resuelve_los_embeddings() -> None:
+    settings = ProviderSettings(
+        api_keys={"openai": "sk-global"},
+        agent_api_keys={"openai": {"MAIA": "sk-maia"}},
+    )
+
+    emb = build_embeddings("openai", "text-embedding-3-small", settings.for_agent("maia"))
+    assert emb._api_key == "sk-maia"
+
+
+def test_for_agent_sin_keys_por_agente_devuelve_el_mismo_objeto() -> None:
+    settings = ProviderSettings(api_keys={"openai": "sk-global"})
+    assert settings.for_agent("maia") is settings
+
+
+def test_has_agent_key_detecta_dedicada() -> None:
+    settings = ProviderSettings(agent_api_keys={"openai": {"STUDENT_SERVICES": "sk-ss"}})
+
+    assert settings.has_agent_key("student_services") is True
+    assert settings.has_agent_key("student-services") is True
+    assert settings.has_agent_key("maia") is False
+    assert settings.has_agent_key("student_services", provider="anthropic") is False
 
 
 async def test_provider_fake_registrado_funciona_end_to_end(monkeypatch) -> None:

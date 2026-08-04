@@ -1,0 +1,23 @@
+{
+  "agent_id": "westy",
+  "agent_name": "Westy",
+  "prompt_id": "system-v1",
+  "prompt_s3_uri": "s3://prisma-agents-knowledge/org=westfield/agents/westy/prompts/system.md",
+  "vector_store_id": "v1",
+  "vector_store_s3_uri": "s3://prisma-agents-knowledge/org=westfield/agents/westy/vector_store/v1/",
+  "llm_provider": "openai",
+  "llm_model": "gpt-4o",
+  "temperature": 0.4,
+  "max_tokens": 800,
+  "top_k": 5,
+  "min_similarity": 0.2,
+  "response_format": "text",
+  "fallback_message": "Soy Westy 🐾. Estoy con un problema técnico en este momento; volvé a intentarlo en unos minutos.",
+  "leak_markers": [],
+  "leak_replacement_message": null,
+  "hard_rules": [],
+  "metadata": {
+    "area": "creacion_de_agentes",
+    "fuente": "Guía Gemini Gems"
+  }
+}
